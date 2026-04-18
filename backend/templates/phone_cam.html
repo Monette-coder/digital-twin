@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Mons IoT - Phone Camera</title>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg: #060d13;
+            --card: #111c2a;
+            --border: #1e3048;
+            --text: #eaf0f6;
+            --muted: #6b8199;
+            --green: #22c55e;
+            --red: #ef4444;
+            --blue: #3b82f6;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(12,21,32,0.9);
+            border-bottom: 1px solid var(--border);
+        }
+        .topbar h1 { font-size: 16px; font-weight: 700; }
+        .topbar h1 span { color: var(--green); }
+        .status-pill {
+            padding: 4px 12px; border-radius: 20px;
+            font-size: 11px; font-weight: 700;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .status-pill.streaming {
+            background: rgba(34,197,94,0.1); color: var(--green);
+            border: 1px solid rgba(34,197,94,0.2);
+        }
+        .status-pill.stopped {
+            background: rgba(239,68,68,0.1); color: var(--red);
+            border: 1px solid rgba(239,68,68,0.2);
+        }
+        .status-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: currentColor; animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        .preview-area {
+            flex: 1; position: relative; background: #000;
+            display: flex; align-items: center; justify-content: center;
+        }
+        video {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        canvas { display: none; }
+
+        .controls {
+            padding: 16px;
+            background: rgba(12,21,32,0.95);
+            border-top: 1px solid var(--border);
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .btn-row { display: flex; gap: 10px; }
+        .btn {
+            flex: 1; padding: 14px; border: none; border-radius: 12px;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            transition: all 0.2s; letter-spacing: 0.3px;
+        }
+        .btn-start {
+            background: var(--green); color: #fff;
+        }
+        .btn-start:active { background: #16a34a; }
+        .btn-stop {
+            background: var(--red); color: #fff;
+        }
+        .btn-stop:active { background: #dc2626; }
+        .btn-flip {
+            background: var(--card); color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-flip:active { background: var(--border); }
+        .btn:disabled { opacity: 0.4; cursor: default; }
+
+        .stats {
+            display: flex; justify-content: space-around;
+            font-size: 11px; color: var(--muted);
+        }
+        .stats span { color: var(--text); font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Mons <span>IoT</span> &middot; Phone Cam</h1>
+        <div class="status-pill stopped" id="statusPill">
+            <div class="status-dot"></div>
+            <span id="statusText">STOPPED</span>
+        </div>
+    </div>
+
+    <div class="preview-area">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="btn-row">
+            <button class="btn btn-start" id="btnStart" onclick="startStreaming()">Start Streaming</button>
+            <button class="btn btn-stop" id="btnStop" onclick="stopStreaming()" disabled>Stop</button>
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-flip" onclick="flipCamera()">&#128260; Flip Camera</button>
+        </div>
+        <div class="stats">
+            <div>FPS: <span id="fpsDisplay">0</span></div>
+            <div>Sent: <span id="frameCount">0</span> frames</div>
+            <div>Size: <span id="frameSize">0</span> KB</div>
+        </div>
+    </div>
+
+<script>
+    // Connect SocketIO to HTTP port 5000 for frame relay to dashboard
+    const wsHost = location.hostname;
+    const socket = io('http://' + wsHost + ':5000');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let streaming = false;
+    let mediaStream = null;
+    let sendInterval = null;
+    let facingMode = 'environment';
+    let framesSent = 0;
+    let lastFpsTime = Date.now();
+    let fpsCount = 0;
+
+    async function openCamera() {
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(t => t.stop());
+            mediaStream = null;
+        }
+
+        // Check if getUserMedia is available (requires HTTPS)
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            document.getElementById('statusText').textContent = 'NO HTTPS';
+            document.getElementById('statusPill').className = 'status-pill stopped';
+            alert('Camera requires HTTPS. Make sure you are using https:// in the URL and have accepted the certificate warning.');
+            return false;
+        }
+
+        try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false
+            });
+            video.srcObject = mediaStream;
+            return true;
+        } catch (e) {
+            if (e.name === 'NotAllowedError') {
+                alert('Camera permission denied. Please allow camera access in your browser settings and reload.');
+            } else if (e.name === 'NotFoundError') {
+                alert('No camera found on this device.');
+            } else if (e.name === 'OverconstrainedError') {
+                // Requested facing mode not available, try without constraint
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+                        audio: false
+                    });
+                    video.srcObject = mediaStream;
+                    return true;
+                } catch (e2) {
+                    alert('Camera error: ' + e2.message);
+                }
+            } else {
+                alert('Camera error: ' + e.message);
+            }
+            return false;
+        }
+    }
+
+    function startStreaming() {
+        if (streaming) return;
+        streaming = true;
+        document.getElementById('btnStart').disabled = true;
+        document.getElementById('btnStop').disabled = false;
+        document.getElementById('statusPill').className = 'status-pill streaming';
+        document.getElementById('statusText').textContent = 'STREAMING';
+
+        sendInterval = setInterval(captureAndSend, 100); // ~10 FPS
+    }
+
+    function stopStreaming() {
+        streaming = false;
+        if (sendInterval) { clearInterval(sendInterval); sendInterval = null; }
+        document.getElementById('btnStart').disabled = false;
+        document.getElementById('btnStop').disabled = true;
+        document.getElementById('statusPill').className = 'status-pill stopped';
+        document.getElementById('statusText').textContent = 'STOPPED';
+    }
+
+    function captureAndSend() {
+        if (!streaming || !mediaStream) return;
+        const track = mediaStream.getVideoTracks()[0];
+        if (!track) return;
+        const settings = track.getSettings();
+        canvas.width = settings.width || 640;
+        canvas.height = settings.height || 480;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        canvas.toBlob(blob => {
+            if (!blob || !streaming) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                // Send as base64 via SocketIO (fastest for real-time relay)
+                const b64 = reader.result.split(',')[1];
+                socket.emit('phone_cam_frame', { data: b64 });
+                framesSent++;
+                fpsCount++;
+                document.getElementById('frameCount').textContent = framesSent;
+                document.getElementById('frameSize').textContent = (blob.size / 1024).toFixed(1);
+
+                const now = Date.now();
+                if (now - lastFpsTime >= 1000) {
+                    document.getElementById('fpsDisplay').textContent = fpsCount;
+                    fpsCount = 0;
+                    lastFpsTime = now;
+                }
+            };
+            reader.readAsDataURL(blob);
+        }, 'image/jpeg', 0.6);
+    }
+
+    async function flipCamera() {
+        facingMode = facingMode === 'environment' ? 'user' : 'environment';
+        const ok = await openCamera();
+        if (!ok) {
+            // Revert if the new facing mode failed
+            facingMode = facingMode === 'environment' ? 'user' : 'environment';
+        }
+    }
+
+    // Auto-open camera on load
+    openCamera();
+</script>
+</body>
+</html>
