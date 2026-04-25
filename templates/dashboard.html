@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mons IoT — Plant Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-0: #f8fafc;
+            --bg-1: #f1f5f9;
+            --bg-2: #ffffff;
+            --bg-3: #e2e8f0;
+            --bg-4: #cbd5e1;
+            --border-0: #e2e8f0;
+            --border-1: #cbd5e1;
+            --text-0: #0f172a;
+            --text-1: #334155;
+            --text-2: #64748b;
+            --text-3: #94a3b8;
+            --green: #16a34a;
+            --green-dim: rgba(22,163,74,0.12);
+            --blue: #2563eb;
+            --blue-dim: rgba(37,99,235,0.12);
+            --amber: #d97706;
+            --amber-dim: rgba(217,119,6,0.12);
+            --red: #dc2626;
+            --red-dim: rgba(220,38,38,0.12);
+            --cyan: #0891b2;
+            --violet: #7c3aed;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --radius-xs: 7px;
+        }
+        *{margin:0;padding:0;box-sizing:border-box}
+
+        body{
+            font-family:'Inter',system-ui,-apple-system,sans-serif;
+            background:var(--bg-0);color:var(--text-0);
+            min-height:100vh;overflow-x:hidden;
+        }
+
+        /* subtle grid bg */
+        body::after{
+            content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+            background:
+                linear-gradient(rgba(59,130,246,.06) 1px,transparent 1px),
+                linear-gradient(90deg,rgba(59,130,246,.06) 1px,transparent 1px);
+            background-size:56px 56px;
+        }
+
+        .app{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh}
+
+        /* ─── NAV ─── */
+        .nav{
+            height:56px;display:flex;align-items:center;justify-content:space-between;
+            padding:0 28px;background:rgba(255,255,255,.8);backdrop-filter:blur(24px);
+            border-bottom:1px solid var(--border-0);position:sticky;top:0;z-index:50;
+        }
+        .nav-brand{display:flex;align-items:center;gap:11px}
+        .nav-icon{
+            width:32px;height:32px;border-radius:9px;
+            background:linear-gradient(135deg,var(--green),var(--cyan));
+            display:flex;align-items:center;justify-content:center;font-size:16px;
+            box-shadow:0 2px 12px rgba(34,197,94,.25);
+        }
+        .nav-brand h1{font-size:16px;font-weight:700;letter-spacing:-.3px}
+        .nav-brand h1 b{color:var(--green);font-weight:800}
+        .nav-right{display:flex;align-items:center;gap:14px}
+        .nav-clock{font-size:11px;color:var(--text-2);font-variant-numeric:tabular-nums}
+        .pill{
+            display:inline-flex;align-items:center;gap:6px;
+            padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;
+            border:1px solid;letter-spacing:.3px;
+        }
+        .pill-live{background:var(--green-dim);color:var(--green);border-color:rgba(34,197,94,.2)}
+        .pill-off{background:var(--red-dim);color:var(--red);border-color:rgba(239,68,68,.2)}
+        .pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 2s infinite}
+
+        /* ─── LAYOUT ─── */
+        .page{flex:1;padding:20px 24px 40px;max-width:1420px;width:100%;margin:0 auto}
+        .section-tag{
+            font-size:10px;font-weight:700;text-transform:uppercase;
+            letter-spacing:1.4px;color:var(--text-3);margin-bottom:12px;
+        }
+
+        .grid-top{
+            display:grid;grid-template-columns:1fr 340px;gap:14px;margin-bottom:18px;
+        }
+        .grid-charts{
+            display:grid;grid-template-columns:5fr 2fr;gap:14px;margin-bottom:18px;
+        }
+
+        /* ─── CARD ─── */
+        .card{
+            background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius);
+            overflow:hidden;transition:border-color .2s,box-shadow .2s;
+        }
+        .card:hover{border-color:var(--border-1);box-shadow:0 8px 16px rgba(0,0,0,.04)}
+        .card-head{
+            padding:14px 18px;display:flex;align-items:center;justify-content:space-between;
+            border-bottom:1px solid var(--border-0);
+        }
+        .card-label{
+            font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;
+            color:var(--text-2);display:flex;align-items:center;gap:7px;
+        }
+        .card-label svg{width:14px;height:14px;opacity:.5}
+        .card-body{padding:16px 18px}
+
+        /* ─── STREAM ─── */
+        .stream{display:flex;flex-direction:column}
+        .stream-view{
+            flex:1;background:#000;min-height:300px;position:relative;
+            display:flex;align-items:center;justify-content:center;
+        }
+        .stream-view img{width:100%;height:100%;object-fit:contain;display:none}
+        .stream-ph{
+            display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--text-3);
+        }
+        .stream-ph-icon{font-size:36px;opacity:.25}
+        .stream-ph-text{font-size:12px;font-weight:500}
+        .stream-ph-hint{font-size:11px;opacity:.5}
+        .stream-foot{
+            display:flex;align-items:center;gap:18px;padding:10px 18px;
+            border-top:1px solid var(--border-0);font-size:11px;color:var(--text-2);
+        }
+        .stream-foot b{color:var(--text-0);font-weight:600}
+        .stream-foot .online b{color:var(--green)}
+
+        /* switcher */
+        .switcher{
+            display:flex;flex-wrap:wrap;background:var(--bg-3);border-radius:var(--radius-xs);
+            border:1px solid var(--border-0);overflow:hidden;
+        }
+        .switcher button{
+            padding:5px 10px;font-size:11px;font-weight:600;
+            background:transparent;color:var(--text-2);border:none;cursor:pointer;
+            transition:all .2s;letter-spacing:.3px;
+        }
+        .switcher button:hover{color:var(--text-0)}
+        .switcher button.active{background:var(--blue);color:#fff}
+        .live-tag{
+            display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;
+            color:var(--green);letter-spacing:.5px;
+        }
+        .live-tag::before{
+            content:'';width:7px;height:7px;border-radius:50%;
+            background:currentColor;animation:pulse 2s infinite;
+            box-shadow:0 0 8px rgba(34,197,94,.4);
+        }
+
+        /* ─── DIGITAL TWIN ─── */
+        .twin-card{display:flex;flex-direction:column}
+        .twin-shell{display:grid;grid-template-columns:1fr;gap:14px;padding:16px 18px 18px}
+        /* Make twin area larger and more prominent */
+        @media(min-width:700px){
+            .twin-shell{padding:32px 32px 32px;}
+            .twin-scene{min-height:420px;}
+            .twin-plant{width:270px;height:260px;}
+            .twin-pot{width:200px;height:120px;}
+        }
+        .twin-scene{
+            position:relative;min-height:320px;padding:14px 24px 14px 24px;border-radius:16px;overflow:hidden;isolation:isolate;
+            border:1px solid var(--border-0);
+            background:
+                radial-gradient(circle at top, rgba(6,182,212,.08), transparent 40%),
+                linear-gradient(180deg, rgba(59,130,246,.02), rgba(248,250,252,.6) 42%, rgba(255,255,255,.96) 42%);
+            display:flex;flex-direction:column;justify-content:space-between;perspective:1000px;
+            box-shadow:0 8px 32px rgba(34,197,94,.05), 0 2px 12px rgba(59,130,246,.04);
+        }
+        .twin-scene::before{
+            content:'';position:absolute;inset:auto -10% 52% -10%;height:130px;z-index:0;
+            background:radial-gradient(circle, rgba(125,211,252,.18), transparent 62%);
+            animation:twinSkyPulse 6s ease-in-out infinite;
+        }
+        .twin-scene::after{
+            content:'';position:absolute;left:-20%;right:-20%;bottom:24px;height:22px;z-index:0;
+            background:radial-gradient(circle, rgba(34,197,94,.14), transparent 60%);
+            filter:blur(10px);
+        }
+        .twin-chip-row{display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:2}
+        .twin-chip{
+            display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;
+            font-size:10px;font-weight:700;letter-spacing:.35px;
+            border:1px solid rgba(59,130,246,.16);background:rgba(255,255,255,.68);color:var(--text-1);
+        }
+        .twin-chip-health{background:var(--blue-dim);color:var(--blue)}
+        .twin-rain{position:absolute;inset:20px 20px 82px;pointer-events:none;opacity:0;z-index:1;transition:opacity .25s ease}
+        .twin-rain span{
+            position:absolute;top:-24px;width:2px;height:28px;border-radius:999px;
+            background:linear-gradient(180deg, rgba(125,211,252,0), rgba(125,211,252,.95));
+            animation:rainDrop 1.3s linear infinite;
+        }
+        .twin-rain span:nth-child(1){left:16%;animation-delay:.1s}
+        .twin-rain span:nth-child(2){left:34%;animation-delay:.55s}
+        .twin-rain span:nth-child(3){left:58%;animation-delay:.2s}
+        .twin-rain span:nth-child(4){left:76%;animation-delay:.8s}
+        .twin-scene.is-watering .twin-rain{opacity:1}
+        .twin-plant{
+            position:relative;width:196px;height:190px;margin:0 auto;z-index:2;
+            display:flex;align-items:flex-end;justify-content:center;transform-style:preserve-3d;
+            transform-origin:bottom center;transition:transform .25s ease,filter .25s ease;
+            animation:twinSway 5.4s ease-in-out infinite;
+        }
+        .twin-glow{
+            position:absolute;inset:10px 20px 38px;border-radius:50%;
+            background:radial-gradient(circle, rgba(34,197,94,.28), rgba(74,222,128,.10) 42%, transparent 72%);
+            filter:blur(12px);opacity:.9;transform:translateZ(-10px);
+        }
+        .twin-shadow{
+            position:absolute;left:24px;right:24px;bottom:8px;height:26px;border-radius:50%;
+            background:radial-gradient(circle, rgba(148,163,184,.38), transparent 68%);
+            filter:blur(6px);transform:translateZ(-20px);
+        }
+        .twin-plant::before{
+            content:'';position:absolute;left:50%;bottom:96px;width:34px;height:54px;
+            transform:translateX(-50%) rotate(8deg) rotateY(18deg) translateZ(12px);
+            border-radius:70% 12% 70% 12%;
+            background:
+                radial-gradient(circle at 30% 26%, rgba(255,255,255,.26), transparent 18%),
+                linear-gradient(135deg,#d9f99d 0%,#86efac 22%,#22c55e 56%,#166534 100%);
+            box-shadow:0 8px 16px rgba(22,163,74,.18);border:1px solid rgba(255,255,255,.08);
+            animation:centerLeafDance 4.6s ease-in-out infinite;
+        }
+        .twin-plant::after{
+            content:'';position:absolute;left:50%;bottom:92px;width:44px;height:18px;
+            transform:translateX(-50%) translateZ(4px);
+            background:radial-gradient(circle, rgba(34,197,94,.24), transparent 70%);
+            filter:blur(6px);
+        }
+        .twin-stem{
+            position:absolute;bottom:18px;left:50%;transform:translateX(-50%) rotateX(8deg) translateZ(8px);
+            width:15px;height:110px;border-radius:999px;
+            background:linear-gradient(180deg,#ecfccb 0%,#86efac 24%,#22c55e 56%,#166534 100%);
+            box-shadow:0 0 12px rgba(34,197,94,.2);
+        }
+        .twin-stem::before{
+            content:'';position:absolute;left:4px;top:8px;bottom:10px;width:2px;
+            background:rgba(255,255,255,.28);border-radius:999px;
+        }
+        .twin-stem::after{
+            content:'';position:absolute;right:2px;top:10px;bottom:12px;width:2px;
+            background:rgba(15,23,42,.14);border-radius:999px;
+        }
+        .twin-leaf{
+            position:absolute;border-radius:60px 60px 60px 10px;backface-visibility:hidden;
+            background:
+                radial-gradient(circle at 30% 24%, rgba(255,255,255,.30), transparent 16%),
+                radial-gradient(circle at 70% 72%, rgba(34,197,94,.22), transparent 22%),
+                linear-gradient(135deg,#d9f99d 0%,#86efac 20%,#22c55e 52%,#166534 100%);
+            box-shadow:0 10px 22px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.08);
+            border:1px solid rgba(255,255,255,.08);
+            transform-origin:bottom center;transition:transform .25s ease,background .25s ease,opacity .25s ease;
+        }
+        .twin-leaf::before{
+            content:'';position:absolute;left:50%;top:18%;width:2px;height:62%;border-radius:999px;
+            background:rgba(255,255,255,.34);transform:translateX(-50%) rotate(18deg);
+        }
+        .twin-leaf::after{
+            content:'';position:absolute;left:16%;right:18%;top:38%;height:1px;
+            background:rgba(255,255,255,.20);transform:rotate(14deg);transform-origin:left center;
+        }
+        .leaf-back-left{left:10px;bottom:76px;width:58px;height:34px;opacity:.82;filter:brightness(.88);transform:rotate(-44deg) rotateY(55deg) translateZ(-12px);animation:backLeafLeftDance 5.2s ease-in-out infinite}
+        .leaf-back-right{right:10px;bottom:76px;width:58px;height:34px;opacity:.82;filter:brightness(.88);transform:scaleX(-1) rotate(-44deg) rotateY(55deg) translateZ(-12px);animation:backLeafRightDance 5.5s ease-in-out infinite}
+        .leaf-left{left:16px;bottom:56px;width:68px;height:40px;transform:rotate(-42deg) rotateY(26deg) translateZ(16px);animation:leafLeftDance 4.4s ease-in-out infinite}
+        .leaf-right{right:16px;bottom:56px;width:68px;height:40px;transform:scaleX(-1) rotate(-42deg) rotateY(26deg) translateZ(16px);animation:leafRightDance 4.9s ease-in-out infinite}
+        .leaf-mid-left{left:28px;bottom:86px;width:58px;height:34px;transform:rotate(-24deg) rotateY(20deg) translateZ(10px);animation:midLeafLeftDance 4.1s ease-in-out infinite}
+        .leaf-mid-right{right:28px;bottom:86px;width:58px;height:34px;transform:scaleX(-1) rotate(-24deg) rotateY(20deg) translateZ(10px);animation:midLeafRightDance 4.5s ease-in-out infinite}
+        .leaf-top-left{left:52px;bottom:118px;width:42px;height:26px;transform:rotate(-10deg) rotateY(16deg) translateZ(4px) scale(.82);animation:topLeafLeftDance 3.8s ease-in-out infinite}
+        .leaf-top-right{right:52px;bottom:118px;width:42px;height:26px;transform:scaleX(-1) rotate(-10deg) rotateY(16deg) translateZ(4px) scale(.82);animation:topLeafRightDance 4.2s ease-in-out infinite}
+        .twin-bloom{
+            position:absolute;top:4px;left:50%;transform:translateX(-50%) translateZ(14px);
+            width:44px;height:44px;border-radius:50%;display:grid;place-items:center;
+            background:radial-gradient(circle, rgba(187,247,208,.24), transparent 70%);
+            filter:drop-shadow(0 0 14px rgba(34,197,94,.24));
+        }
+        .twin-bloom span{display:block;font-size:28px;animation:bloomPulse 3.6s ease-in-out infinite;}
+        .twin-scene.is-low{box-shadow:inset 0 0 0 1px rgba(239,68,68,.12)}
+        .twin-scene.is-mid{box-shadow:inset 0 0 0 1px rgba(59,130,246,.10)}
+        .twin-scene.is-high{box-shadow:inset 0 0 0 1px rgba(34,197,94,.10)}
+        .twin-plant.is-dry{filter:saturate(.78) brightness(.9)}
+        .twin-plant.is-dry::before,
+        .twin-plant.is-dry .twin-leaf{
+            background:
+                radial-gradient(circle at 30% 24%, rgba(255,255,255,.22), transparent 16%),
+                linear-gradient(135deg,#bef264 0%,#84cc16 36%,#4d7c0f 100%);
+            opacity:.9;
+        }
+        .twin-plant.is-dry .leaf-back-left{animation-name:backLeafLeftDryDance}
+        .twin-plant.is-dry .leaf-back-right{animation-name:backLeafRightDryDance}
+        .twin-plant.is-dry .leaf-left{animation-name:leafLeftDryDance}
+        .twin-plant.is-dry .leaf-right{animation-name:leafRightDryDance}
+        .twin-plant.is-dry .leaf-mid-left{animation-name:midLeafLeftDryDance}
+        .twin-plant.is-dry .leaf-mid-right{animation-name:midLeafRightDryDance}
+        .twin-plant.is-dry .leaf-top-left{animation-name:topLeafLeftDryDance}
+        .twin-plant.is-dry .leaf-top-right{animation-name:topLeafRightDryDance}
+        .twin-plant.is-dry .twin-bloom{filter:grayscale(.18)}
+        .twin-plant.is-ok{filter:saturate(1.02)}
+        .twin-plant.is-lush{filter:saturate(1.24) drop-shadow(0 0 20px rgba(34,197,94,.16));transform:scale(1.035)}
+        .twin-plant.is-lush::before,
+        .twin-plant.is-lush .twin-leaf{box-shadow:0 12px 24px rgba(34,197,94,.14), inset 0 1px 0 rgba(255,255,255,.1)}
+        .twin-plant.is-watering{transform:translateY(-2px) scale(1.02)}
+        .twin-pot{
+            position:relative;width:150px;height:90px;margin:0 auto 4px;overflow:hidden;z-index:2;
+            background:linear-gradient(180deg,#b07b53 0%, #89583a 34%, #5d3a27 100%);
+            clip-path:polygon(12% 0,88% 0,100% 100%,0 100%);
+            border:1px solid rgba(255,255,255,.08);
+            box-shadow:inset 0 8px 10px rgba(255,255,255,.08), inset 0 -12px 18px rgba(0,0,0,.22), 0 10px 24px rgba(0,0,0,.16);
+            transform:rotateX(6deg);
+        }
+        .twin-pot::before{
+            content:'';position:absolute;left:8%;right:8%;top:-2px;height:16px;border-radius:50%;
+            background:linear-gradient(180deg,#c99872,#7b4e33);border:1px solid rgba(255,255,255,.08);
+        }
+        .twin-pot::after{
+            content:'';position:absolute;right:16px;top:14px;bottom:16px;width:18px;border-radius:999px;
+            background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,0));opacity:.45;
+        }
+        .twin-soil-line{position:absolute;left:12%;right:12%;top:13px;height:9px;border-radius:999px;background:#4b2e1d;z-index:2}
+        .twin-water-fill{
+            position:absolute;left:0;right:0;bottom:0;height:18%;overflow:hidden;
+            transition:height .9s cubic-bezier(.4,0,.2,1),background .3s ease,opacity .3s ease,filter .3s ease;
+            background:linear-gradient(180deg,rgba(59,130,246,.78),rgba(6,182,212,.55));
+        }
+        .twin-water-fill::before,
+        .twin-water-fill::after{
+            content:'';position:absolute;left:-10%;right:-10%;height:18px;border-radius:50%;
+            background:rgba(255,255,255,.16);animation:waterWave 2.8s linear infinite;
+        }
+        .twin-water-fill::before{top:-8px;opacity:.5}
+        .twin-water-fill::after{top:-3px;opacity:.25;animation-duration:3.6s;animation-direction:reverse}
+        .twin-water-fill.is-low{background:linear-gradient(180deg,rgba(245,158,11,.55),rgba(239,68,68,.42));opacity:.72}
+        .twin-water-fill.is-mid{background:linear-gradient(180deg,rgba(59,130,246,.8),rgba(6,182,212,.58))}
+        .twin-water-fill.is-high{background:linear-gradient(180deg,rgba(34,197,94,.72),rgba(6,182,212,.55));filter:saturate(1.08)}
+        .twin-water-fill.is-watering{box-shadow:0 0 14px rgba(34,211,238,.24)}
+        .twin-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:10px}
+        .twin-mini-stat{
+            padding:11px 12px;border-radius:10px;border:1px solid var(--border-0);
+            background:var(--bg-1);display:flex;flex-direction:column;gap:4px;
+        }
+        .twin-mini-stat span{font-size:10px;font-weight:700;letter-spacing:.55px;text-transform:uppercase;color:var(--text-3)}
+        .twin-mini-stat b{font-size:13px;color:var(--text-0);font-weight:700}
+        .twin-foot{
+            display:flex;align-items:center;gap:18px;padding:10px 18px;border-top:1px solid var(--border-0);
+            font-size:11px;color:var(--text-2)
+        }
+        .twin-foot b{color:var(--text-0);font-weight:600}
+        .twin-foot .online b{color:var(--green)}
+
+        /* ─── SIDEBAR PANELS ─── */
+        .side-panels{display:flex;flex-direction:column;gap:14px}
+
+        /* soil ring */
+        .soil-ring{
+            display:flex;flex-direction:column;align-items:center;padding:20px 14px 16px;
+        }
+        .ring-wrap{position:relative;width:100px;height:100px;margin-bottom:12px}
+        .ring-wrap svg{width:100%;height:100%;transform:rotate(-90deg)}
+        .ring-wrap circle{fill:none;cx:50;cy:50;r:42}
+        .ring-bg{stroke:var(--border-0);stroke-width:7}
+        .ring-fill{
+            stroke:var(--blue);stroke-width:7;stroke-linecap:round;
+            stroke-dasharray:263.89;stroke-dashoffset:263.89;
+            transition:stroke-dashoffset .8s cubic-bezier(.4,0,.2,1),stroke .4s;
+            filter:drop-shadow(0 0 6px rgba(59,130,246,.3));
+        }
+        .ring-center{
+            position:absolute;inset:0;display:flex;flex-direction:column;
+            align-items:center;justify-content:center;
+        }
+        .ring-val{font-size:28px;font-weight:800;color:var(--blue);line-height:1;letter-spacing:-.5px;transition:color .4s}
+        .ring-unit{font-size:10px;color:var(--text-2);margin-top:3px}
+        .soil-status{
+            display:inline-flex;align-items:center;gap:5px;
+            padding:4px 11px;border-radius:6px;font-size:11px;font-weight:600;margin-bottom:8px;
+        }
+        .soil-status.wet{background:var(--green-dim);color:var(--green)}
+        .soil-status.dry{background:var(--red-dim);color:var(--red)}
+        .soil-status.ok{background:var(--blue-dim);color:var(--blue)}
+        .soil-bar{width:100%;height:5px;background:var(--border-0);border-radius:3px;overflow:hidden;margin-top:8px}
+        .soil-bar-fill{
+            height:100%;border-radius:3px;transition:width .8s cubic-bezier(.4,0,.2,1);
+            background:linear-gradient(90deg,var(--green),var(--blue),var(--red));
+        }
+        .soil-ticks{
+            display:flex;justify-content:space-between;width:100%;
+            font-size:9px;color:var(--text-3);margin-top:4px;
+        }
+
+        /* pump */
+        .pump-block{text-align:center;padding:18px 14px}
+        .pump-ico{
+            width:52px;height:52px;border-radius:50%;margin:0 auto 10px;
+            display:flex;align-items:center;justify-content:center;font-size:22px;
+            transition:all .3s;
+        }
+        .pump-ico.off{background:var(--bg-3);border:2px solid var(--border-0)}
+        .pump-ico.on{background:var(--green-dim);border:2px solid rgba(34,197,94,.3);animation:glow 2s infinite}
+        .pump-val{font-size:22px;font-weight:800;letter-spacing:-.3px;transition:color .3s}
+        .pump-val.on{color:var(--green)}.pump-val.off{color:var(--text-3)}
+        .pump-lbl{font-size:11px;color:var(--text-2);margin-top:2px}
+        .pump-stats{
+            display:flex;justify-content:space-around;margin-top:14px;padding-top:14px;
+            border-top:1px solid var(--border-0);
+        }
+        .pump-stat-n{font-size:15px;font-weight:700}.pump-stat-t{font-size:10px;color:var(--text-2);margin-top:2px}
+
+        /* device rows */
+        .dev-rows{display:flex;flex-direction:column;gap:8px;padding:14px}
+        .dev-row{
+            display:flex;justify-content:space-between;align-items:center;
+            padding:9px 12px;background:var(--bg-1);border-radius:var(--radius-xs);
+            border:1px solid var(--border-0);
+        }
+        .dev-k{font-size:11px;color:var(--text-2);font-weight:500}
+        .dev-v{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+        .dev-v.g{color:var(--green)}.dev-v.b{color:var(--blue)}.dev-v.a{color:var(--amber)}
+
+        /* ─── CHART ─── */
+        .chart-wrap{position:relative;height:220px;padding:0 4px}
+
+        /* level bars */
+        .level-list{display:flex;flex-direction:column;gap:7px}
+        .lvl-row{display:flex;align-items:center;gap:8px}
+        .lvl-time{font-size:10px;color:var(--text-3);width:44px;text-align:right;font-variant-numeric:tabular-nums}
+        .lvl-track{flex:1;height:18px;background:var(--bg-1);border-radius:5px;overflow:hidden}
+        .lvl-fill{height:100%;border-radius:5px;transition:width .5s ease}
+        .lvl-val{font-size:10px;font-weight:600;color:var(--text-2);width:32px;font-variant-numeric:tabular-nums}
+
+        /* ─── TABLE ─── */
+        .tbl-scroll{overflow-x:auto;max-height:360px;overflow-y:auto}
+        table{width:100%;border-collapse:collapse}
+        th{
+            position:sticky;top:0;z-index:2;
+            background:var(--bg-2);text-align:left;
+            padding:10px 18px;font-size:10px;font-weight:700;
+            text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);
+            border-bottom:1px solid var(--border-0);
+        }
+        td{
+            padding:10px 18px;font-size:12px;border-bottom:1px solid var(--border-0);
+            font-variant-numeric:tabular-nums;color:var(--text-1);
+        }
+        td:first-child{color:var(--text-3);font-size:11px}
+        tr:hover td{background:rgba(59,130,246,.02)}
+        .badge{
+            display:inline-flex;align-items:center;gap:5px;
+            padding:3px 9px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.3px;
+        }
+        .badge.on{background:var(--green-dim);color:var(--green)}
+        .badge.off{background:var(--bg-3);color:var(--text-3)}
+        .badge-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+        .td-soil{color:var(--blue)!important;font-weight:600}
+
+        .tbl-head{
+            padding:14px 18px;display:flex;align-items:center;justify-content:space-between;
+            border-bottom:1px solid var(--border-0);
+        }
+        .tbl-head h3{font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px}
+        .tbl-count{font-size:10px;color:var(--text-3)}
+
+        /* ─── FOOTER ─── */
+        .footer{text-align:center;padding:20px;font-size:10px;color:var(--text-3);border-top:1px solid var(--border-0)}
+
+        /* ─── ANIMATIONS ─── */
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+        @keyframes glow{0%,100%{box-shadow:0 0 16px rgba(34,197,94,.08)}50%{box-shadow:0 0 28px rgba(34,197,94,.2)}}
+        @keyframes slideIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes twinSway{0%,100%{transform:translateX(0) rotate(-1.4deg)}50%{transform:translateX(3px) rotate(1.2deg)}}
+        @keyframes centerLeafDance{0%,100%{transform:translateX(-50%) rotate(8deg) rotateY(18deg) translateZ(12px)}50%{transform:translateX(-50%) rotate(2deg) rotateY(12deg) translateZ(14px) translateY(-2px)}}
+        @keyframes backLeafLeftDance{0%,100%{transform:rotate(-44deg) rotateY(55deg) translateZ(-12px)}50%{transform:rotate(-36deg) rotateY(50deg) translateZ(-8px) translateY(-2px)}}
+        @keyframes backLeafRightDance{0%,100%{transform:scaleX(-1) rotate(-44deg) rotateY(55deg) translateZ(-12px)}50%{transform:scaleX(-1) rotate(-36deg) rotateY(50deg) translateZ(-8px) translateY(-2px)}}
+        @keyframes leafLeftDance{0%,100%{transform:rotate(-42deg) rotateY(26deg) translateZ(16px)}50%{transform:rotate(-30deg) rotateY(22deg) translateZ(18px) translateY(-4px)}}
+        @keyframes leafRightDance{0%,100%{transform:scaleX(-1) rotate(-42deg) rotateY(26deg) translateZ(16px)}50%{transform:scaleX(-1) rotate(-30deg) rotateY(22deg) translateZ(18px) translateY(-4px)}}
+        @keyframes midLeafLeftDance{0%,100%{transform:rotate(-24deg) rotateY(20deg) translateZ(10px)}50%{transform:rotate(-12deg) rotateY(14deg) translateZ(12px) translateY(-3px)}}
+        @keyframes midLeafRightDance{0%,100%{transform:scaleX(-1) rotate(-24deg) rotateY(20deg) translateZ(10px)}50%{transform:scaleX(-1) rotate(-12deg) rotateY(14deg) translateZ(12px) translateY(-3px)}}
+        @keyframes topLeafLeftDance{0%,100%{transform:rotate(-10deg) rotateY(16deg) translateZ(4px) scale(.82)}50%{transform:rotate(-2deg) rotateY(10deg) translateZ(6px) translateY(-2px) scale(.84)}}
+        @keyframes topLeafRightDance{0%,100%{transform:scaleX(-1) rotate(-10deg) rotateY(16deg) translateZ(4px) scale(.82)}50%{transform:scaleX(-1) rotate(-2deg) rotateY(10deg) translateZ(6px) translateY(-2px) scale(.84)}}
+        @keyframes backLeafLeftDryDance{0%,100%{transform:rotate(-54deg) rotateY(54deg) translateZ(-10px) translateY(8px)}50%{transform:rotate(-48deg) rotateY(48deg) translateZ(-8px) translateY(10px)}}
+        @keyframes backLeafRightDryDance{0%,100%{transform:scaleX(-1) rotate(-54deg) rotateY(54deg) translateZ(-10px) translateY(8px)}50%{transform:scaleX(-1) rotate(-48deg) rotateY(48deg) translateZ(-8px) translateY(10px)}}
+        @keyframes leafLeftDryDance{0%,100%{transform:rotate(-54deg) rotateY(18deg) translateZ(10px) translateY(8px)}50%{transform:rotate(-48deg) rotateY(16deg) translateZ(10px) translateY(10px)}}
+        @keyframes leafRightDryDance{0%,100%{transform:scaleX(-1) rotate(-54deg) rotateY(18deg) translateZ(10px) translateY(8px)}50%{transform:scaleX(-1) rotate(-48deg) rotateY(16deg) translateZ(10px) translateY(10px)}}
+        @keyframes midLeafLeftDryDance{0%,100%{transform:rotate(-38deg) rotateY(14deg) translateZ(6px) translateY(8px)}50%{transform:rotate(-32deg) rotateY(12deg) translateZ(6px) translateY(9px)}}
+        @keyframes midLeafRightDryDance{0%,100%{transform:scaleX(-1) rotate(-38deg) rotateY(14deg) translateZ(6px) translateY(8px)}50%{transform:scaleX(-1) rotate(-32deg) rotateY(12deg) translateZ(6px) translateY(9px)}}
+        @keyframes topLeafLeftDryDance{0%,100%{transform:rotate(-20deg) rotateY(10deg) translateZ(2px) translateY(6px) scale(.78)}50%{transform:rotate(-15deg) rotateY(8deg) translateZ(2px) translateY(7px) scale(.78)}}
+        @keyframes topLeafRightDryDance{0%,100%{transform:scaleX(-1) rotate(-20deg) rotateY(10deg) translateZ(2px) translateY(6px) scale(.78)}50%{transform:scaleX(-1) rotate(-15deg) rotateY(8deg) translateZ(2px) translateY(7px) scale(.78)}}
+        @keyframes bloomPulse{0%,100%{transform:scale(1) rotate(-1deg)}50%{transform:scale(1.08) rotate(2deg)}}
+        @keyframes waterWave{0%{transform:translateX(-8%)}100%{transform:translateX(8%)}}
+        @keyframes rainDrop{0%{transform:translateY(0);opacity:0}20%{opacity:1}100%{transform:translateY(210px);opacity:0}}
+        @keyframes twinSkyPulse{0%,100%{opacity:.65;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+
+        /* ─── RESPONSIVE ─── */
+        @media(max-width:1100px){
+            .grid-top{grid-template-columns:1fr}
+            .side-panels{flex-direction:row;flex-wrap:wrap}
+            .side-panels>.card{flex:1;min-width:200px}
+            .grid-charts{grid-template-columns:1fr}
+        }
+        @media(max-width:640px){
+            .nav{padding:0 16px}.page{padding:14px 12px 30px}
+            .side-panels{flex-direction:column}
+            .card-head{flex-direction:column;align-items:flex-start;gap:10px}
+            .stream-view{min-height:220px}
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── NAV ── -->
+<nav class="nav">
+    <div class="nav-brand">
+        <div class="nav-icon">🌱</div>
+        <h1>Mons <b>IoT</b></h1>
+    </div>
+    <div class="nav-right">
+        <span class="nav-clock" id="headerTime"></span>
+        <span class="pill pill-live" id="connBadge">
+            <span class="pill-dot"></span>
+            <span id="connText">LIVE</span>
+        </span>
+    </div>
+</nav>
+
+<!-- ── PAGE ── -->
+<main class="page">
+
+    <!-- ── TOP: Monitoring Modes + Sidebar ── -->
+    <div class="section-tag">Monitoring Modes</div>
+    <div class="grid-top">
+
+        <!-- Monitor panel -->
+        <div class="card twin-card">
+            <div class="card-head">
+                <div class="card-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22V12"/><path d="M12 12c0-3 2-5 5-5"/><path d="M12 16c0-2-1.5-4-4-4"/><path d="M12 9c0-3-2-5-5-5"/></svg>
+                    <span id="modeTitle">Digital Plant Twin</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <div class="switcher">
+                        <button id="btnTwin" class="active" onclick="switchView('twin')">Digital Twin</button>
+                        <button id="btnEspCam" onclick="switchView('esp')">ESP-CAM</button>
+                        <button id="btnPhoneCam" onclick="switchView('phone')">Phone Cam</button>
+                    </div>
+                    <div class="live-tag" id="streamBadge">LIVE MODEL</div>
+                </div>
+            </div>
+            <div class="twin-shell" id="twinView">
+                <div class="twin-scene" id="twinScene">
+                    <div class="twin-chip-row">
+                        <span class="twin-chip twin-chip-health" id="twinMood">Initializing</span>
+                        <span class="twin-chip" id="twinStage">Waiting for sensor data</span>
+                    </div>
+                    <div class="twin-rain" id="twinRain">
+                        <span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="twin-plant is-ok" id="twinPlant">
+                        <div class="twin-glow"></div>
+                        <div class="twin-shadow"></div>
+                        <div class="twin-stem"></div>
+                        <div class="twin-leaf leaf-back-left"></div>
+                        <div class="twin-leaf leaf-back-right"></div>
+                        <div class="twin-leaf leaf-left"></div>
+                        <div class="twin-leaf leaf-right"></div>
+                        <div class="twin-leaf leaf-mid-left"></div>
+                        <div class="twin-leaf leaf-mid-right"></div>
+                        <div class="twin-leaf leaf-top-left"></div>
+                        <div class="twin-leaf leaf-top-right"></div>
+                        <!-- (all plant part pointer labels and decorative bloom removed as requested) -->
+                        <!-- (sensor labels and pointer lines removed as requested) -->
+                    </div>
+                            <!-- (removed accidental CSS code block) -->
+                    <div class="twin-pot">
+                        <div class="twin-soil-line"></div>
+                        <div class="twin-water-fill" id="twinWaterFill"></div>
+                    </div>
+                </div>
+                <div class="twin-stats">
+                    <div class="twin-mini-stat"><span>Soil</span><b id="twinWaterText">--%</b></div>
+                    <div class="twin-mini-stat"><span>Pump</span><b id="twinPumpText">Standby</b></div>
+                    <div class="twin-mini-stat"><span>Temp</span><b id="twinTemp">--°C</b></div>
+                    <div class="twin-mini-stat"><span>Humidity</span><b id="twinHumidity">--%</b></div>
+                    <div class="twin-mini-stat"><span>pH</span><b id="twinPH">--</b></div>
+                    <div class="twin-mini-stat"><span>Weather</span><b id="twinWeather">--</b></div>
+                </div>
+            </div>
+            <div id="cameraView" style="display:none">
+                <div class="stream-view" id="streamBody">
+                    <div class="stream-ph" id="streamPlaceholder">
+                        <div class="stream-ph-icon">📹</div>
+                        <div class="stream-ph-text">Waiting for ESP32-CAM...</div>
+                        <div class="stream-ph-hint">Live feed will appear automatically</div>
+                    </div>
+                    <img id="camStreamImg" src="" alt="Live Stream" />
+                </div>
+                <div class="stream-foot">
+                    <span class="online">Status: <b id="camStatus">Awaiting</b></span>
+                    <span>IP: <b id="camIP">&mdash;</b></span>
+                </div>
+            </div>
+            <div class="twin-foot" id="twinFooter">
+                <span class="online">Status: <b id="twinStatus">Awaiting live readings</b></span>
+                <span>Health: <b id="twinHealth">Balanced</b></span>
+            </div>
+        </div>
+
+        <!-- Side panels -->
+        <div class="side-panels">
+
+            <!-- Soil Gauge -->
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/></svg>
+                        Soil Moisture
+                    </div>
+                </div>
+                <div class="soil-ring">
+                    <div class="ring-wrap">
+                        <svg viewBox="0 0 100 100">
+                            <circle class="ring-bg"/>
+                            <circle class="ring-fill" id="gaugeFill"/>
+                        </svg>
+                        <div class="ring-center">
+                            <div class="ring-val" id="valSoil">--</div>
+                            <div class="ring-unit">%</div>
+                        </div>
+                    </div>
+                    <div class="soil-status ok" id="soilStatus">
+                        <span>●</span> Waiting for data
+                    </div>
+                    <div class="soil-bar"><div class="soil-bar-fill" id="gaugeBarFill" style="width:0%"></div></div>
+                    <div class="soil-ticks"><span>Dry</span><span>Wet</span></div>
+                </div>
+            </div>
+
+            <!-- Pump -->
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                        Water Pump
+                    </div>
+                </div>
+                <div class="pump-block">
+                    <div class="pump-ico off" id="pumpVisual">⚙️</div>
+                    <div class="pump-val off" id="valPump">OFF</div>
+                    <div class="pump-lbl" id="pumpSub">Standing by</div>
+                    <div class="pump-stats">
+                        <div><div class="pump-stat-n" id="pumpCycles">0</div><div class="pump-stat-t">Cycles</div></div>
+                        <div><div class="pump-stat-n" id="lastPumpTime">--</div><div class="pump-stat-t">Last run</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device -->
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        Device
+                    </div>
+                </div>
+                <div class="dev-rows">
+                    <div class="dev-row"><span class="dev-k">Board</span><span class="dev-v">ESP8266 + ESP32</span></div>
+                    <div class="dev-row"><span class="dev-k">WiFi</span><span class="dev-v g" id="devWifi">Connected</span></div>
+                    <div class="dev-row"><span class="dev-k">IP</span><span class="dev-v b" id="devIP">--</span></div>
+                    <div class="dev-row"><span class="dev-k">Readings</span><span class="dev-v" id="devReadings">0</span></div>
+                    <div class="dev-row"><span class="dev-k">Updated</span><span class="dev-v a" id="devLastUpdate">--</span></div>
+                    <div class="dev-row"><span class="dev-k">🌡️ Temp</span><span class="dev-v a" id="devTemp">--</span></div>
+                    <div class="dev-row"><span class="dev-k">💨 Humidity</span><span class="dev-v b" id="devHumidity">--</span></div>
+                    <div class="dev-row"><span class="dev-k">🧪 pH</span><span class="dev-v" id="devPH">--</span></div>
+                    <div class="dev-row"><span class="dev-k">☁️ Weather</span><span class="dev-v" id="devWeather">--</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── CHARTS ── -->
+    <div class="section-tag">Analytics</div>
+    <div class="grid-charts">
+        <div class="card">
+            <div class="card-head">
+                <div class="card-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Soil Moisture Over Time
+                </div>
+            </div>
+            <div class="card-body"><div class="chart-wrap"><canvas id="chartSoil"></canvas></div></div>
+        </div>
+        <div class="card">
+            <div class="card-head">
+                <div class="card-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    Recent Levels
+                </div>
+            </div>
+            <div class="card-body"><div class="level-list" id="levelBars"></div></div>
+        </div>
+    </div>
+
+    <!-- ── TABLE ── -->
+    <div class="section-tag">Data Log</div>
+    <div class="card">
+        <div class="tbl-head">
+            <h3>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.4"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Recent Readings
+            </h3>
+            <span class="tbl-count" id="readingCount"></span>
+        </div>
+        <div class="tbl-scroll">
+            <table>
+                <thead><tr><th>Timestamp</th><th>Soil Moisture</th><th>Pump Status</th></tr></thead>
+                <tbody id="readingsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer class="footer">Mons IoT &middot; Plant Monitoring System &middot; ESP8266 + ESP32-CAM</footer>
+</main>
+</div>
+
+<script>
+// ── SocketIO ──
+const socket = io();
+const connBadge = document.getElementById('connBadge');
+const connText = document.getElementById('connText');
+socket.on('connect', () => { connBadge.className = 'pill pill-live'; connText.textContent = 'LIVE'; });
+socket.on('disconnect', () => { connBadge.className = 'pill pill-off'; connText.textContent = 'OFFLINE'; });
+
+// ── Clock ──
+function updateClock() {
+    document.getElementById('headerTime').textContent = new Date().toLocaleString('en-US', {
+        weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'
+    });
+}
+updateClock(); setInterval(updateClock, 1000);
+
+// ── Chart ──
+const MAX_POINTS = 60;
+const chartLabels = [];
+const chartCtx = document.getElementById('chartSoil').getContext('2d');
+const gradient = chartCtx.createLinearGradient(0, 0, 0, 220);
+gradient.addColorStop(0, 'rgba(59,130,246,0.18)');
+gradient.addColorStop(1, 'rgba(59,130,246,0)');
+
+const chartSoil = new Chart(chartCtx, {
+    type: 'line',
+    data: {
+        labels: chartLabels,
+        datasets: [{
+            label: 'Soil Moisture',
+            data: [],
+            borderColor: '#3b82f6',
+            backgroundColor: gradient,
+            fill: true, tension: 0.4,
+            pointRadius: 0, pointHoverRadius: 5,
+            pointHoverBackgroundColor: '#3b82f6',
+            borderWidth: 2,
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: 400, easing: 'easeOutQuart' },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderWidth: 1,
+                titleFont: { size: 11, weight: '600' }, bodyFont: { size: 12 }, titleColor: '#334155', bodyColor: '#0f172a',
+                padding: 10, cornerRadius: 8,
+                callbacks: { label: ctx => 'Soil: ' + ctx.parsed.y + '%' }
+            }
+        },
+        scales: {
+            x: { ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: 'rgba(226,232,240,0.8)', drawBorder: false } },
+            y: { min: 0, max: 100, ticks: { color: '#64748b', font: { size: 10 }, stepSize: 25, callback: v => v + '%' }, grid: { color: 'rgba(226,232,240,0.8)', drawBorder: false } }
+        }
+    }
+});
+
+// ── State ──
+let totalReadings = 0;
+let pumpCycles = 0;
+let lastPumpState = false;
+const levelBarsData = [];
+
+// ── Keep latest data from each device ──
+let latestESP32Data = { temperature: null, humidity: null, ph_value: null };
+let latestNodeMCUData = { soil_percent: 0, pump_status: false };
+
+// ── Throttle mechanism to prevent excessive redraws ──
+let lastChartUpdate = 0;
+let lastLevelBarUpdate = 0;
+let lastTableUpdate = 0;
+let lastDisplayUpdate = 0;  // Main display throttle
+const CHART_THROTTLE_MS = 1000;      // Update chart every 1 second max
+const LEVELBAR_THROTTLE_MS = 1000;   // Update level bars every 1 second max
+const TABLE_THROTTLE_MS = 500;       // Update table every 0.5 seconds max
+const DISPLAY_THROTTLE_MS = 800;     // Update gauge/twin/pump/device every 0.8 seconds max
+let pendingChartPoint = null;
+let pendingLevelBarPoint = null;
+let pendingTableRow = null;
+let pendingDisplayData = null;       // Batch display updates
+
+// ── Gauge ──
+function updateGauge(pctVal) {
+    const pct = Math.min(Math.max(pctVal / 100, 0), 1);
+    const C = 2 * Math.PI * 42;
+    document.getElementById('gaugeFill').style.strokeDasharray = C;
+    document.getElementById('gaugeFill').style.strokeDashoffset = C * (1 - pct);
+    document.getElementById('valSoil').textContent = pctVal;
+    document.getElementById('gaugeBarFill').style.width = (pct * 100) + '%';
+
+    const fill = document.getElementById('gaugeFill');
+    const rv = document.getElementById('valSoil');
+    const st = document.getElementById('soilStatus');
+
+    if (pctVal <= 20) {
+        fill.style.stroke = '#ef4444'; rv.style.color = '#ef4444';
+        st.className = 'soil-status dry'; st.innerHTML = '<span>●</span> Dry — needs water';
+    } else if (pctVal <= 60) {
+        fill.style.stroke = '#3b82f6'; rv.style.color = '#3b82f6';
+        st.className = 'soil-status ok'; st.innerHTML = '<span>●</span> Moderate moisture';
+    } else {
+        fill.style.stroke = '#22c55e'; rv.style.color = '#22c55e';
+        st.className = 'soil-status wet'; st.innerHTML = '<span>●</span> Well watered';
+    }
+}
+
+function updatePump(isOn) {
+    const ico = document.getElementById('pumpVisual');
+    const val = document.getElementById('valPump');
+    const lbl = document.getElementById('pumpSub');
+    if (isOn) {
+        ico.className = 'pump-ico on'; val.className = 'pump-val on'; val.textContent = 'ON';
+        lbl.textContent = 'Watering in progress...';
+        if (!lastPumpState) { pumpCycles++; document.getElementById('pumpCycles').textContent = pumpCycles; }
+        document.getElementById('lastPumpTime').textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    } else {
+        ico.className = 'pump-ico off'; val.className = 'pump-val off'; val.textContent = 'OFF';
+        lbl.textContent = 'Standing by';
+    }
+    lastPumpState = isOn;
+}
+
+function updateDevice(d) {
+    totalReadings++;
+    document.getElementById('devReadings').textContent = totalReadings;
+    document.getElementById('devLastUpdate').textContent = d.created_at ? d.created_at.split(' ')[1] : '--';
+    
+    // Update temperature, humidity, and pH if available
+    if (d.temperature != null) {
+        document.getElementById('devTemp').textContent = Number(d.temperature).toFixed(1) + '°C';
+    }
+    if (d.humidity != null) {
+        document.getElementById('devHumidity').textContent = Math.round(Number(d.humidity)) + '%';
+    }
+    if (d.ph_value != null) {
+        document.getElementById('devPH').textContent = Number(d.ph_value).toFixed(2);
+    }
+}
+
+function pushChartPoint(d) {
+    const t = d.created_at ? d.created_at.split(' ')[1] : new Date().toLocaleTimeString();
+    pendingChartPoint = { t: t, v: d.soil_percent != null ? d.soil_percent : 0 };
+    
+    const now = Date.now();
+    if (now - lastChartUpdate >= CHART_THROTTLE_MS) {
+        lastChartUpdate = now;
+        if (pendingChartPoint) {
+            chartLabels.push(pendingChartPoint.t);
+            chartSoil.data.datasets[0].data.push(pendingChartPoint.v);
+            if (chartLabels.length > MAX_POINTS) { chartLabels.shift(); chartSoil.data.datasets[0].data.shift(); }
+            chartSoil.update();
+            pendingChartPoint = null;
+        }
+    }
+}
+
+function updateLevelBars(d) {
+    const t = d.created_at ? d.created_at.split(' ')[1] : '--';
+    const v = d.soil_percent != null ? d.soil_percent : 0;
+    pendingLevelBarPoint = { time: t, val: v };
+    
+    const now = Date.now();
+    if (now - lastLevelBarUpdate >= LEVELBAR_THROTTLE_MS) {
+        lastLevelBarUpdate = now;
+        if (pendingLevelBarPoint) {
+            levelBarsData.unshift(pendingLevelBarPoint);
+            if (levelBarsData.length > 10) levelBarsData.pop();
+            renderLevelBars();
+            pendingLevelBarPoint = null;
+        }
+    }
+}
+
+function renderLevelBars() {
+    document.getElementById('levelBars').innerHTML = levelBarsData.map(b => {
+        const p = Math.min(Math.max(b.val, 0), 100);
+        const c = b.val <= 20 ? '#ef4444' : b.val <= 60 ? '#3b82f6' : '#22c55e';
+        return `<div class="lvl-row">
+            <span class="lvl-time">${b.time}</span>
+            <div class="lvl-track"><div class="lvl-fill" style="width:${p}%;background:linear-gradient(90deg,${c}cc,${c}44)"></div></div>
+            <span class="lvl-val">${b.val}%</span>
+        </div>`;
+    }).join('');
+}
+
+function addTableRow(d, prepend) {
+    const tbody = document.getElementById('readingsBody');
+    
+    if (prepend) {
+        // Live update - apply throttling to prevent constant DOM updates
+        pendingTableRow = d;
+        
+        const now = Date.now();
+        if (now - lastTableUpdate >= TABLE_THROTTLE_MS) {
+            lastTableUpdate = now;
+            if (pendingTableRow) {
+                const tr = document.createElement('tr');
+                tr.style.animation = 'slideIn .3s ease';
+                const pv = pendingTableRow.soil_percent != null ? pendingTableRow.soil_percent : '--';
+                tr.innerHTML = `
+                    <td>${pendingTableRow.created_at || '—'}</td>
+                    <td class="td-soil">${pv}%</td>
+                    <td><span class="badge ${pendingTableRow.pump_status?'on':'off'}"><span class="badge-dot"></span>${pendingTableRow.pump_status?'ON':'OFF'}</span></td>`;
+                tbody.insertBefore(tr, tbody.firstChild);
+                while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
+                pendingTableRow = null;
+            }
+        }
+    } else {
+        // Initial load - no throttling needed
+        const tr = document.createElement('tr');
+        tr.style.animation = 'none';
+        const pv = d.soil_percent != null ? d.soil_percent : '--';
+        tr.innerHTML = `
+            <td>${d.created_at || '—'}</td>
+            <td class="td-soil">${pv}%</td>
+            <td><span class="badge ${d.pump_status?'on':'off'}"><span class="badge-dot"></span>${d.pump_status?'ON':'OFF'}</span></td>`;
+        tbody.appendChild(tr);
+    }
+}
+
+function updateTwin(d) {
+    const soil = d.soil_percent != null ? Number(d.soil_percent) : 0;
+    const temp = d.temperature != null ? Number(d.temperature).toFixed(1) + '°C' : '--';
+    const humidity = d.humidity != null ? Math.round(Number(d.humidity)) + '%' : '--';
+    const ph = d.ph_value != null ? Number(d.ph_value).toFixed(2) : '--';
+    const isPumpOn = !!d.pump_status;
+
+    const twinScene = document.getElementById('twinScene');
+    const twinPlant = document.getElementById('twinPlant');
+    const twinMood = document.getElementById('twinMood');
+    const twinStage = document.getElementById('twinStage');
+    const twinStatus = document.getElementById('twinStatus');
+    const twinHealth = document.getElementById('twinHealth');
+    const twinWaterFill = document.getElementById('twinWaterFill');
+
+    document.getElementById('twinWaterText').textContent = soil + '%';
+    document.getElementById('twinPumpText').textContent = isPumpOn ? 'Watering now' : 'Standby';
+    document.getElementById('twinTemp').textContent = temp;
+    document.getElementById('twinHumidity').textContent = humidity;
+    document.getElementById('twinPH').textContent = ph;
+
+    const waterLevel = Math.max(4, Math.min(soil, 100));
+    twinWaterFill.style.height = waterLevel + '%';
+    twinPlant.className = 'twin-plant';
+    twinScene.className = 'twin-scene';
+    twinWaterFill.className = 'twin-water-fill';
+
+    if (soil <= 20) {
+        twinScene.classList.add('is-low');
+        twinPlant.classList.add('is-dry');
+        twinWaterFill.classList.add('is-low');
+        twinMood.textContent = 'Thirsty';
+        twinStage.textContent = isPumpOn ? 'Emergency watering' : 'Water reserve is low';
+        twinStatus.textContent = 'Low soil moisture detected';
+        twinHealth.textContent = 'Low';
+    } else if (soil <= 60) {
+        twinScene.classList.add('is-mid');
+        twinPlant.classList.add('is-ok');
+        twinWaterFill.classList.add('is-mid');
+        twinMood.textContent = isPumpOn ? 'Hydrating' : 'Stable';
+        twinStage.textContent = 'Growing steadily';
+        twinStatus.textContent = 'Plant conditions are within range';
+        twinHealth.textContent = 'Balanced';
+    } else {
+        twinScene.classList.add('is-high');
+        twinPlant.classList.add('is-lush');
+        twinWaterFill.classList.add('is-high');
+        twinMood.textContent = 'Thriving';
+        twinStage.textContent = isPumpOn ? 'Well hydrated' : 'Healthy canopy';
+        twinStatus.textContent = 'Moisture reserve looks good';
+        twinHealth.textContent = 'Excellent';
+    }
+
+    if (isPumpOn) {
+        twinScene.classList.add('is-watering');
+        twinPlant.classList.add('is-watering');
+        twinWaterFill.classList.add('is-watering');
+    }
+}
+
+function handleReading(d) {
+    // Store data for batched updates
+    pendingDisplayData = d;
+    
+    // Batch all visual updates (gauge, pump, twin, device) to reduce flicker
+    const now = Date.now();
+    if (now - lastDisplayUpdate >= DISPLAY_THROTTLE_MS) {
+        lastDisplayUpdate = now;
+        if (pendingDisplayData) {
+            updateGauge(pendingDisplayData.soil_percent != null ? pendingDisplayData.soil_percent : 0);
+            updatePump(pendingDisplayData.pump_status);
+            updateDevice(pendingDisplayData);
+            updateTwin(pendingDisplayData);
+            pendingDisplayData = null;
+        }
+    }
+    
+    // Chart, levelbar, table updates use their own throttling
+    pushChartPoint(d);
+    updateLevelBars(d);
+}
+
+function handleESP32Reading(d) {
+    // ESP32: temperature, humidity, pH only
+    latestESP32Data = { temperature: d.temperature, humidity: d.humidity, ph_value: d.ph_value };
+    
+    const now = Date.now();
+    if (now - lastDisplayUpdate >= DISPLAY_THROTTLE_MS) {
+        lastDisplayUpdate = now;
+        totalReadings++;
+        document.getElementById('devReadings').textContent = totalReadings;
+        document.getElementById('devTemp').textContent = Number(d.temperature).toFixed(1) + '°C';
+        document.getElementById('devHumidity').textContent = Math.round(Number(d.humidity)) + '%';
+        document.getElementById('devPH').textContent = Number(d.ph_value).toFixed(2);
+        document.getElementById('devLastUpdate').textContent = d.created_at ? d.created_at.split(' ')[1] : '--';
+    }
+}
+
+function handleNodeMCUReading(d) {
+    // NodeMCU: soil, gauge, pump only
+    latestNodeMCUData = { soil_percent: d.soil_percent, pump_status: d.pump_status };
+    
+    const now = Date.now();
+    if (now - lastDisplayUpdate >= DISPLAY_THROTTLE_MS) {
+        lastDisplayUpdate = now;
+        totalReadings++;
+        document.getElementById('devReadings').textContent = totalReadings;
+        
+        // Update gauge and pump
+        updateGauge(d.soil_percent);
+        updatePump(d.pump_status);
+        
+        // Update twin water level only (don't touch temp/humidity display)
+        const twinWaterFill = document.getElementById('twinWaterFill');
+        const soil = Number(d.soil_percent);
+        twinWaterFill.style.height = Math.max(4, Math.min(soil, 100)) + '%';
+        
+        const twinPlant = document.getElementById('twinPlant');
+        const twinScene = document.getElementById('twinScene');
+        
+        twinPlant.className = 'twin-plant';
+        twinScene.className = 'twin-scene';
+        twinWaterFill.className = 'twin-water-fill';
+        
+        if (soil <= 20) {
+            twinScene.classList.add('is-low');
+            twinPlant.classList.add('is-dry');
+            twinWaterFill.classList.add('is-low');
+        } else if (soil <= 60) {
+            twinScene.classList.add('is-mid');
+            twinPlant.classList.add('is-ok');
+            twinWaterFill.classList.add('is-mid');
+        } else {
+            twinScene.classList.add('is-high');
+            twinPlant.classList.add('is-lush');
+            twinWaterFill.classList.add('is-high');
+        }
+        
+        if (d.pump_status) {
+            twinScene.classList.add('is-watering');
+            twinPlant.classList.add('is-watering');
+            twinWaterFill.classList.add('is-watering');
+        }
+        
+        document.getElementById('devLastUpdate').textContent = d.created_at ? d.created_at.split(' ')[1] : '--';
+    }
+    
+    pushChartPoint(d);
+    updateLevelBars(d);
+}
+
+// ── Real-time ──
+socket.on('new_reading', d => { handleReading(d); addTableRow(d, true); });
+socket.on('esp32_reading', d => { handleESP32Reading(d); });
+socket.on('nodemcu_reading', d => { handleNodeMCUReading(d); addTableRow(d, true); });
+
+// ── Init load ──
+fetch('/api/readings?limit=200').then(r=>r.json()).then(readings => {
+    totalReadings = readings.length;
+    
+    // Find latest ESP32 reading by device_type
+    let lastESP32 = null;
+    for (let i = readings.length - 1; i >= 0; i--) {
+        if (readings[i].device_type === 'esp32' || (readings[i].temperature !== null && readings[i].temperature !== 0)) {
+            lastESP32 = readings[i];
+            break;
+        }
+    }
+    
+    // Find latest NodeMCU reading by device_type
+    let lastNodeMCU = null;
+    for (let i = readings.length - 1; i >= 0; i--) {
+        if (readings[i].device_type === 'nodemcu' || (readings[i].soil_percent !== null && readings[i].soil_percent > 0)) {
+            lastNodeMCU = readings[i];
+            break;
+        }
+    }
+    
+    // Display NodeMCU data (soil/gauge/pump)
+    if (lastNodeMCU) {
+        updateGauge(lastNodeMCU.soil_percent);
+        updatePump(lastNodeMCU.pump_status);
+        latestNodeMCUData = { soil_percent: lastNodeMCU.soil_percent, pump_status: lastNodeMCU.pump_status };
+        
+        // Update twin with soil data
+        const twinWaterFill = document.getElementById('twinWaterFill');
+        const soil = Number(lastNodeMCU.soil_percent);
+        twinWaterFill.style.height = Math.max(4, Math.min(soil, 100)) + '%';
+    }
+    
+    // Display ESP32 data (temp/humidity/pH)
+    if (lastESP32) {
+        if (lastESP32.temperature !== null && lastESP32.temperature !== 0) {
+            document.getElementById('devTemp').textContent = Number(lastESP32.temperature).toFixed(1) + '°C';
+        }
+        if (lastESP32.humidity !== null && lastESP32.humidity !== 0) {
+            document.getElementById('devHumidity').textContent = Math.round(Number(lastESP32.humidity)) + '%';
+        }
+        if (lastESP32.ph_value !== null && lastESP32.ph_value !== 0) {
+            document.getElementById('devPH').textContent = Number(lastESP32.ph_value).toFixed(2);
+        }
+        latestESP32Data = { temperature: lastESP32.temperature, humidity: lastESP32.humidity, ph_value: lastESP32.ph_value };
+    }
+    
+    document.getElementById('devReadings').textContent = totalReadings;
+    const lastReading = lastNodeMCU || lastESP32;
+    if (lastReading) {
+        document.getElementById('devLastUpdate').textContent = lastReading.created_at ? lastReading.created_at.split(' ')[1] : '--';
+    }
+    
+    readings.forEach(d => { pushChartPoint(d); addTableRow(d, false); });
+    readings.slice(-10).reverse().forEach(d => {
+        levelBarsData.push({ time: d.created_at ? d.created_at.split(' ')[1] : '--', val: d.soil_percent != null ? d.soil_percent : 0 });
+    });
+    renderLevelBars();
+    document.getElementById('readingCount').textContent = readings.length + ' entries';
+});
+
+// ── Monitor mode switcher ──
+let currentView = 'twin';
+let espCamOnline = false;
+let snapshotTimer = null;
+
+function stopSnapshotPolling() {
+    if (snapshotTimer) { clearInterval(snapshotTimer); snapshotTimer = null; }
+}
+
+function setActiveMode(mode) {
+    document.getElementById('btnTwin').classList.toggle('active', mode === 'twin');
+    document.getElementById('btnEspCam').classList.toggle('active', mode === 'esp');
+    document.getElementById('btnPhoneCam').classList.toggle('active', mode === 'phone');
+    document.getElementById('twinView').style.display = mode === 'twin' ? 'grid' : 'none';
+    document.getElementById('twinFooter').style.display = mode === 'twin' ? 'flex' : 'none';
+    document.getElementById('cameraView').style.display = mode === 'twin' ? 'none' : 'block';
+}
+
+function showTwinView() {
+    currentView = 'twin';
+    stopSnapshotPolling();
+    setActiveMode('twin');
+    document.getElementById('modeTitle').textContent = 'Digital Plant Twin';
+    const badge = document.getElementById('streamBadge');
+    badge.textContent = 'LIVE MODEL';
+    badge.style.display = 'flex';
+}
+
+function activateStream(streamUrl) {
+    espCamOnline = true;
+    if (currentView === 'esp') showEspStream();
+}
+
+function showEspStream() {
+    currentView = 'esp';
+    setActiveMode('esp');
+    document.getElementById('modeTitle').textContent = 'ESP-CAM View';
+
+    const img = document.getElementById('camStreamImg');
+    const ph = document.getElementById('streamPlaceholder');
+    const badge = document.getElementById('streamBadge');
+
+    if (espCamOnline) {
+        ph.style.display = 'none';
+        img.style.display = 'block';
+        badge.textContent = 'ESP LIVE';
+        badge.style.display = 'flex';
+
+        let loading = false;
+        function fetchFrame() {
+            if (loading || currentView !== 'esp') return;
+            loading = true;
+            const tmp = new Image();
+            tmp.onload = () => { img.src = tmp.src; loading = false; };
+            tmp.onerror = () => { loading = false; };
+            tmp.src = '/api/camera/proxy-capture?t=' + Date.now();
+        }
+        fetchFrame();
+        stopSnapshotPolling();
+        snapshotTimer = setInterval(fetchFrame, 200);
+    } else {
+        stopSnapshotPolling();
+        img.style.display = 'none';
+        img.src = '';
+        ph.querySelector('.stream-ph-text').textContent = 'Waiting for ESP32-CAM...';
+        ph.querySelector('.stream-ph-hint').textContent = 'Live feed will appear automatically';
+        ph.style.display = 'flex';
+        badge.style.display = 'none';
+    }
+}
+
+function showPhoneStream() {
+    currentView = 'phone';
+    stopSnapshotPolling();
+    setActiveMode('phone');
+    document.getElementById('modeTitle').textContent = 'Phone Cam View';
+
+    const img = document.getElementById('camStreamImg');
+    const ph = document.getElementById('streamPlaceholder');
+    const badge = document.getElementById('streamBadge');
+
+    img.src = '';
+    img.style.display = 'none';
+    ph.querySelector('.stream-ph-text').textContent = 'Waiting for phone camera...';
+    ph.querySelector('.stream-ph-hint').textContent = 'Open /phone-cam on your phone to start streaming';
+    ph.style.display = 'flex';
+    badge.style.display = 'none';
+    document.getElementById('camStatus').textContent = 'Waiting';
+    document.getElementById('camIP').textContent = 'Phone stream';
+}
+
+function switchView(mode) {
+    if (mode === 'twin') showTwinView();
+    else if (mode === 'esp') showEspStream();
+    else showPhoneStream();
+}
+
+socket.on('phone_cam_frame', data => {
+    if (currentView !== 'phone') return;
+    const img = document.getElementById('camStreamImg');
+    const ph = document.getElementById('streamPlaceholder');
+    const badge = document.getElementById('streamBadge');
+    img.src = 'data:image/jpeg;base64,' + data.data;
+    img.style.display = 'block';
+    ph.style.display = 'none';
+    badge.textContent = 'PHONE LIVE';
+    badge.style.display = 'flex';
+    document.getElementById('camStatus').textContent = 'Online';
+    document.getElementById('camIP').textContent = 'Phone stream';
+});
+
+socket.on('camera_status', data => {
+    document.getElementById('camStatus').textContent = 'Online';
+    document.getElementById('camIP').textContent = data.ip || '--';
+    if (data.stream_url) activateStream(data.stream_url);
+});
+
+fetch('/api/camera/info').then(r=>r.json()).then(info => {
+    if (info.online) {
+        document.getElementById('camStatus').textContent = 'Online';
+        document.getElementById('camIP').textContent = info.ip || '--';
+        if (info.stream_url) activateStream(info.stream_url);
+    }
+}).catch(() => {});
+
+showTwinView();
+
+// ── Weather (from Flask / Open-Meteo) ──
+function fetchWeather() {
+    fetch('/api/weather').then(r => r.json()).then(w => {
+        // Don't overwrite actual sensor values with weather data
+        // if (w.temperature != null) document.getElementById('devTemp').textContent = w.temperature + '°C';
+        // if (w.humidity != null) document.getElementById('devHumidity').textContent = w.humidity + '%';
+        if (w.description) {
+            document.getElementById('devWeather').textContent = w.description;
+            document.getElementById('twinWeather').textContent = w.description;
+        }
+    }).catch(() => {
+        document.getElementById('devWeather').textContent = 'Unavailable';
+    });
+}
+fetchWeather();
+setInterval(fetchWeather, 5 * 60 * 1000); // refresh every 5 min
+</script>
+</body>
+</html>
