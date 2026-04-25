@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mons IoT Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #060d13;
+            --bg-secondary: #0c1520;
+            --bg-card: #111c2a;
+            --bg-card-alt: #0f1824;
+            --bg-elevated: #162233;
+            --border: #1e3048;
+            --border-light: #253d58;
+            --text-primary: #eaf0f6;
+            --text-secondary: #6b8199;
+            --text-muted: #3d5468;
+            --accent-blue: #3b82f6;
+            --accent-green: #22c55e;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-cyan: #06b6d4;
+            --accent-violet: #8b5cf6;
+            --glow-blue: rgba(59, 130, 246, 0.15);
+            --glow-green: rgba(34, 197, 94, 0.15);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Atmospheric background ────────────────────── */
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background:
+                radial-gradient(ellipse 800px 600px at 20% 10%, rgba(59,130,246,0.04), transparent),
+                radial-gradient(ellipse 600px 500px at 80% 80%, rgba(34,197,94,0.03), transparent);
+            pointer-events: none; z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(59,130,246,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.025) 1px, transparent 1px);
+            background-size: 48px 48px;
+            pointer-events: none; z-index: 0;
+        }
+
+        .app { position: relative; z-index: 1; }
+
+        /* ── Animations ────────────────────────────────── */
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(34,197,94,0.08)} 50%{box-shadow:0 0 35px rgba(34,197,94,0.18)} }
+        @keyframes barPulse { 0%,100%{opacity:0.8} 50%{opacity:1} }
+
+        /* ── Header ────────────────────────────────────── */
+        .header {
+            background: rgba(12, 21, 32, 0.85);
+            backdrop-filter: blur(20px) saturate(1.3);
+            border-bottom: 1px solid var(--border);
+            padding: 0 32px;
+            height: 64px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 50;
+        }
+        .header-left { display: flex; align-items: center; gap: 14px; }
+        .header-logo {
+            width: 38px; height: 38px;
+            background: linear-gradient(135deg, #22c55e, #06b6d4);
+            border-radius: 11px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 19px;
+            box-shadow: 0 4px 16px rgba(34,197,94,0.2);
+        }
+        .header h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.4px; }
+        .header h1 span { color: var(--accent-green); }
+        .header-right { display: flex; align-items: center; gap: 16px; }
+        .header-time {
+            font-size: 12px; color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+        .connection-badge {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 14px; border-radius: 20px;
+            font-size: 12px; font-weight: 600;
+            background: rgba(34,197,94,0.08);
+            color: var(--accent-green);
+            border: 1px solid rgba(34,197,94,0.18);
+            letter-spacing: 0.3px;
+        }
+        .connection-badge.offline {
+            background: rgba(239,68,68,0.08); color: var(--accent-red);
+            border-color: rgba(239,68,68,0.18);
+        }
+        .status-dot {
+            width: 7px; height: 7px; background: currentColor;
+            border-radius: 50%; animation: pulse 2s infinite;
+        }
+
+        /* ── Main layout ───────────────────────────────── */
+        .main { padding: 12px 24px; max-width: 1440px; margin: 0 auto; }
+        .section-label {
+            font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1.2px; color: var(--text-muted);
+            margin-bottom: 10px; padding-left: 2px;
+        }
+
+        /* ── Hero row: Stream + Sensor sidebar ─────────── */
+        .hero-grid {
+            display: grid;
+            grid-template-columns: 1fr 250px;
+            gap: 10px; margin-bottom: 16px;
+        }
+
+        /* ── Sensor sidebar ────────────────────────────── */
+        .sensor-sidebar { display: flex; flex-direction: column; gap: 8px; }
+
+        /* ── Top row: Gauge + Pump + Device ────────────── */
+        .top-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px; margin-bottom: 20px;
+        }
+
+        /* ── Card base ─────────────────────────────────── */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px; padding: 12px;
+            position: relative; overflow: hidden;
+            transition: border-color 0.25s, box-shadow 0.25s;
+            animation: fadeUp 0.4s ease both;
+        }
+        .card:hover { border-color: var(--border-light); box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+        .card-title {
+            font-size: 10px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.8px; color: var(--text-secondary); margin-bottom: 10px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .card-title svg { width: 14px; height: 14px; opacity: 0.6; }
+
+        /* ── Soil moisture gauge ───────────────────────── */
+        .gauge-card { animation-delay: 0.05s; }
+        .gauge-wrap { display: flex; align-items: center; gap: 28px; }
+        .gauge-ring {
+            position: relative; width: 140px; height: 140px; flex-shrink: 0;
+        }
+        .gauge-ring svg { width: 140px; height: 140px; transform: rotate(-90deg); }
+        .gauge-ring circle {
+            fill: none; stroke-width: 10; cx: 70; cy: 70; r: 58;
+        }
+        .gauge-bg { stroke: var(--border); }
+        .gauge-fill {
+            stroke: var(--accent-blue);
+            stroke-linecap: round;
+            stroke-dasharray: 364.42;
+            stroke-dashoffset: 364.42;
+            transition: stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1), stroke 0.4s;
+            filter: drop-shadow(0 0 8px rgba(59,130,246,0.3));
+        }
+        .gauge-center {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+        }
+        .gauge-value {
+            font-size: 32px; font-weight: 800; color: var(--accent-blue);
+            letter-spacing: -1px; line-height: 1;
+            transition: color 0.4s;
+        }
+        .gauge-unit { font-size: 11px; color: var(--text-secondary); margin-top: 4px; font-weight: 500; }
+        .gauge-info { flex: 1; }
+        .gauge-info h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+        .gauge-status {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 5px 12px; border-radius: 8px;
+            font-size: 12px; font-weight: 600;
+            margin-bottom: 14px;
+        }
+        .gauge-status.wet { background: rgba(34,197,94,0.1); color: var(--accent-green); }
+        .gauge-status.dry { background: rgba(239,68,68,0.1); color: var(--accent-red); }
+        .gauge-status.ok { background: rgba(59,130,246,0.1); color: var(--accent-blue); }
+        .gauge-bar-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; }
+        .gauge-bar {
+            height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+        }
+        .gauge-bar-fill {
+            height: 100%; border-radius: 3px;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-blue), var(--accent-red));
+            transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+        }
+        .gauge-thresholds {
+            display: flex; justify-content: space-between;
+            font-size: 10px; color: var(--text-muted); margin-top: 4px;
+        }
+
+        /* ── Pump card ─────────────────────────────────── */
+        .pump-card { animation-delay: 0.1s; text-align: center; }
+        .pump-visual {
+            width: 100px; height: 100px; margin: 0 auto 16px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px;
+            transition: all 0.4s;
+        }
+        .pump-visual.off {
+            background: rgba(30,48,72,0.5);
+            border: 2px solid var(--border);
+        }
+        .pump-visual.on {
+            background: rgba(34,197,94,0.12);
+            border: 2px solid rgba(34,197,94,0.3);
+            animation: glow 2s infinite;
+        }
+        .pump-state {
+            font-size: 28px; font-weight: 800; letter-spacing: -0.5px;
+            margin-bottom: 4px; transition: color 0.3s;
+        }
+        .pump-state.on { color: var(--accent-green); }
+        .pump-state.off { color: var(--text-muted); }
+        .pump-label { font-size: 13px; color: var(--text-secondary); }
+        .pump-uptime {
+            margin-top: 16px; padding-top: 16px;
+            border-top: 1px solid var(--border);
+            display: flex; justify-content: space-around;
+        }
+        .pump-stat-val { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+        .pump-stat-lbl { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+        /* ── Device card ───────────────────────────────── */
+        .device-card { animation-delay: 0.15s; }
+        .device-rows { display: flex; flex-direction: column; gap: 12px; }
+        .device-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 14px; background: var(--bg-card-alt);
+            border-radius: 10px; border: 1px solid rgba(30,48,72,0.5);
+        }
+        .device-row-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+        .device-row-value { font-size: 13px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+        .device-row-value.green { color: var(--accent-green); }
+        .device-row-value.blue { color: var(--accent-blue); }
+        .device-row-value.amber { color: var(--accent-amber); }
+
+        /* ── Chart section ─────────────────────────────── */
+        .chart-grid {
+            display: grid; grid-template-columns: 2fr 1fr;
+            gap: 16px; margin-bottom: 28px;
+        }
+        .chart-card { padding: 20px 24px; }
+        .chart-card .card-title { margin-bottom: 14px; }
+        .chart-wrapper { position: relative; height: 240px; }
+
+        /* ── Soil level bar ────────────────────────────── */
+        .level-card { display: flex; flex-direction: column; }
+        .level-bars { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+        .level-bar-row { display: flex; align-items: center; gap: 10px; }
+        .level-bar-time { font-size: 10px; color: var(--text-muted); width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+        .level-bar-track { flex: 1; height: 20px; background: var(--bg-card-alt); border-radius: 6px; overflow: hidden; position: relative; }
+        .level-bar-fill {
+            height: 100%; border-radius: 6px;
+            background: linear-gradient(90deg, rgba(59,130,246,0.7), rgba(59,130,246,0.3));
+            transition: width 0.5s ease;
+            position: relative;
+        }
+        .level-bar-fill::after {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(90deg, transparent 60%, rgba(255,255,255,0.05));
+        }
+        .level-bar-val {
+            font-size: 11px; font-weight: 600; color: var(--text-secondary);
+            width: 36px; font-variant-numeric: tabular-nums;
+        }
+
+        /* ── Camera / Stream section ────────────────────── */
+        .stream-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden; position: relative;
+            display: flex; flex-direction: column;
+            animation: fadeUp 0.4s ease both;
+        }
+        .stream-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .stream-title {
+            font-size: 12px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.8px; color: var(--text-secondary);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .stream-title svg { width: 16px; height: 16px; opacity: 0.6; }
+        .stream-header-right { display: flex; align-items: center; gap: 10px; }
+        .cam-switcher {
+            display: flex; background: var(--bg-card-alt); border-radius: 8px;
+            border: 1px solid var(--border); overflow: hidden;
+        }
+        .cam-switcher button {
+            padding: 5px 12px; font-size: 11px; font-weight: 600;
+            background: transparent; color: var(--text-secondary);
+            border: none; cursor: pointer; transition: all 0.2s;
+            letter-spacing: 0.3px; white-space: nowrap;
+        }
+        .cam-switcher button:hover { color: var(--text-primary); }
+        .cam-switcher button.active {
+            background: var(--accent-blue); color: #fff;
+        }
+        .stream-live-dot {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 11px; font-weight: 700; color: var(--accent-green);
+            letter-spacing: 0.5px;
+        }
+        .stream-live-dot::before {
+            content: ''; width: 8px; height: 8px;
+            background: var(--accent-green); border-radius: 50%;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 8px rgba(34,197,94,0.4);
+        }
+        .stream-body {
+            flex: 1; background: #000; position: relative;
+            min-height: 140px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .stream-body img {
+            width: 100%; height: 100%; object-fit: contain;
+            display: none;
+        }
+        .stream-placeholder {
+            display: flex; flex-direction: column;
+            align-items: center; gap: 10px; color: var(--text-muted);
+        }
+        .stream-placeholder .ph-icon { font-size: 40px; opacity: 0.3; }
+        .stream-placeholder .ph-text { font-size: 13px; font-weight: 500; }
+        .stream-placeholder .ph-hint { font-size: 11px; opacity: 0.6; }
+        .stream-footer {
+            display: flex; align-items: center; gap: 20px;
+            padding: 10px 20px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-card);
+        }
+        .stream-meta { font-size: 11px; color: var(--text-secondary); }
+        .stream-meta span { color: var(--text-primary); font-weight: 600; }
+        .stream-meta.online span { color: var(--accent-green); }
+
+        /* ── Compact gauge for sidebar ─────────────────── */
+        .gauge-compact .gauge-wrap { flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+        .gauge-compact .gauge-ring { width: 64px; height: 64px; }
+        .gauge-compact .gauge-ring svg { width: 64px; height: 64px; }
+        .gauge-compact .gauge-ring circle { cx: 32; cy: 32; r: 26; stroke-width: 6; }
+        .gauge-compact .gauge-value { font-size: 17px; }
+        .gauge-compact .gauge-info { width: 100%; }
+        .gauge-compact .gauge-fill {
+            stroke-dasharray: 201.06;
+            stroke-dashoffset: 201.06;
+        }
+
+        /* ── Compact pump for sidebar ──────────────────── */
+        .pump-compact .pump-visual { width: 40px; height: 40px; font-size: 18px; margin-bottom: 6px; }
+        .pump-compact .pump-state { font-size: 16px; }
+        .pump-compact .pump-uptime { margin-top: 8px; padding-top: 8px; }
+
+        /* ── Table section ─────────────────────────────── */
+        .table-card { padding: 0; }
+        .table-header {
+            padding: 18px 24px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .table-header h3 { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .table-count { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+        .table-scroll { overflow-x: auto; max-height: 380px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            position: sticky; top: 0; z-index: 2;
+            background: var(--bg-card); text-align: left;
+            padding: 11px 20px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.8px;
+            color: var(--text-muted); border-bottom: 1px solid var(--border);
+        }
+        td {
+            padding: 11px 20px; font-size: 13px;
+            border-bottom: 1px solid rgba(30,48,72,0.3);
+            font-variant-numeric: tabular-nums; color: var(--text-secondary);
+        }
+        td:first-child { color: var(--text-muted); font-size: 12px; }
+        tr { transition: background 0.15s; }
+        tr:hover td { background: rgba(59,130,246,0.02); }
+        .badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 6px;
+            font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+        }
+        .badge.on {
+            background: rgba(34,197,94,0.1); color: var(--accent-green);
+        }
+        .badge.off {
+            background: rgba(61,84,104,0.2); color: var(--text-muted);
+        }
+        .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+        .td-soil { color: var(--accent-blue) !important; font-weight: 600; }
+
+        /* ── Footer ────────────────────────────────────── */
+        .footer {
+            text-align: center; padding: 24px;
+            font-size: 11px; color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            margin-top: 20px;
+        }
+
+        /* ── Responsive ────────────────────────────────── */
+        @media (max-width: 1024px) {
+            .hero-grid { grid-template-columns: 1fr; }
+            .sensor-sidebar { flex-direction: row; flex-wrap: wrap; }
+            .sensor-sidebar > .card { flex: 1; min-width: 200px; }
+            .top-grid { grid-template-columns: 1fr 1fr; }
+            .device-card { grid-column: span 2; }
+            .chart-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .header { padding: 0 16px; }
+            .main { padding: 16px; }
+            .hero-grid { grid-template-columns: 1fr; }
+            .sensor-sidebar { flex-direction: column; }
+            .top-grid { grid-template-columns: 1fr; }
+            .device-card { grid-column: span 1; }
+            .gauge-wrap { flex-direction: column; text-align: center; }
+            .stream-body { min-height: 240px; }
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="header-logo">&#127793;</div>
+            <h1>Mons <span>IoT</span></h1>
+        </div>
+        <div class="header-right">
+            <span class="header-time" id="headerTime"></span>
+            <div class="connection-badge" id="connBadge">
+                <div class="status-dot"></div>
+                <span id="connText">CONNECTING</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+
+        <!-- Hero: Stream + Sensor sidebar -->
+        <div class="section-label">Live Monitoring</div>
+        <div class="hero-grid">
+
+            <!-- Live stream (primary) -->
+            <div class="stream-card">
+                <div class="stream-header">
+                    <div class="stream-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                        <span id="camSourceLabel">Plant Camera</span>
+                    </div>
+                    <div class="stream-header-right">
+                        <div class="cam-switcher">
+                            <button id="btnEspCam" class="active" onclick="switchCam('esp')">ESP-CAM</button>
+                            <button id="btnPhoneCam" onclick="switchCam('phone')">Phone</button>
+                        </div>
+                        <div class="stream-live-dot" id="streamBadge" style="display:none">LIVE</div>
+                    </div>
+                </div>
+                <div class="stream-body" id="streamBody">
+                    <div class="stream-placeholder" id="streamPlaceholder">
+                        <div class="ph-icon">&#127902;&#65039;</div>
+                        <div class="ph-text">Waiting for ESP32-CAM...</div>
+                        <div class="ph-hint">Live feed will appear automatically</div>
+                    </div>
+                    <img id="camStreamImg" src="" alt="Live Stream" />
+                </div>
+                <div class="stream-footer">
+                    <div class="stream-meta online">Status: <span id="camStatus">Awaiting</span></div>
+                    <div class="stream-meta">IP: <span id="camIP">&mdash;</span></div>
+                </div>
+            </div>
+
+            <!-- Sensor sidebar -->
+            <div class="sensor-sidebar">
+
+                <!-- Soil moisture gauge (compact) -->
+                <div class="card gauge-card gauge-compact">
+                    <div class="card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/></svg>
+                        Soil Moisture
+                    </div>
+                    <div class="gauge-wrap">
+                        <div class="gauge-ring">
+                            <svg viewBox="0 0 64 64">
+                                <circle class="gauge-bg" cx="32" cy="32" r="26" fill="none" stroke-width="6"/>
+                                <circle class="gauge-fill" id="gaugeFill" cx="32" cy="32" r="26" fill="none" stroke-width="6"/>
+                            </svg>
+                            <div class="gauge-center">
+                                <div class="gauge-value" id="valSoil">--</div>
+                                <div class="gauge-unit">%</div>
+                            </div>
+                        </div>
+                        <div class="gauge-info">
+                            <div class="gauge-status ok" id="soilStatus">
+                                <span>&#9679;</span> Waiting for data
+                            </div>
+                            <div class="gauge-bar-label">Moisture level</div>
+                            <div class="gauge-bar">
+                                <div class="gauge-bar-fill" id="gaugeBarFill" style="width:0%"></div>
+                            </div>
+                            <div class="gauge-thresholds">
+                                <span>Dry</span>
+                                <span>20%</span>
+                                <span>Wet</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pump status (compact) -->
+                <div class="card pump-card pump-compact">
+                    <div class="card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                        Water Pump
+                    </div>
+                    <div class="pump-visual off" id="pumpVisual">&#9881;&#65039;</div>
+                    <div class="pump-state off" id="valPump">OFF</div>
+                    <div class="pump-label" id="pumpSub">Standing by</div>
+                    <div class="pump-uptime">
+                        <div>
+                            <div class="pump-stat-val" id="pumpCycles">0</div>
+                            <div class="pump-stat-lbl">Cycles</div>
+                        </div>
+                        <div>
+                            <div class="pump-stat-val" id="lastPumpTime">--</div>
+                            <div class="pump-stat-lbl">Last run</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Device info (compact) -->
+                <div class="card device-card">
+                    <div class="card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        Device
+                    </div>
+                    <div class="device-rows">
+                        <div class="device-row">
+                            <span class="device-row-label">Board</span>
+                            <span class="device-row-value">ESP8266</span>
+                        </div>
+                        <div class="device-row">
+                            <span class="device-row-label">WiFi</span>
+                            <span class="device-row-value green" id="devWifi">Connected</span>
+                        </div>
+                        <div class="device-row">
+                            <span class="device-row-label">IP</span>
+                            <span class="device-row-value blue" id="devIP">--</span>
+                        </div>
+                        <div class="device-row">
+                            <span class="device-row-label">Readings</span>
+                            <span class="device-row-value" id="devReadings">0</span>
+                        </div>
+                        <div class="device-row">
+                            <span class="device-row-label">Updated</span>
+                            <span class="device-row-value amber" id="devLastUpdate">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts row -->
+        <div class="section-label">Analytics</div>
+        <div class="chart-grid">
+            <div class="card chart-card">
+                <div class="card-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Soil Moisture Over Time
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="chartSoil"></canvas>
+                </div>
+            </div>
+            <div class="card level-card">
+                <div class="card-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    Recent Levels
+                </div>
+                <div class="level-bars" id="levelBars"></div>
+            </div>
+        </div>
+
+        <!-- Readings table -->
+        <div class="section-label">Data Log</div>
+        <div class="card table-card">
+            <div class="table-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    Recent Readings
+                </h3>
+                <span class="table-count" id="readingCount"></span>
+            </div>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Soil Moisture</th>
+                            <th>Pump Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="readingsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <footer class="footer">
+            Mons IoT &middot; Plant Monitoring System &middot; NodeMCU ESP8266
+        </footer>
+    </main>
+</div>
+
+<script>
+    // ── SocketIO ──────────────────────────────────────────────
+    const socket = io();
+    const connBadge = document.getElementById('connBadge');
+    const connText  = document.getElementById('connText');
+
+    socket.on('connect', () => { connBadge.classList.remove('offline'); connText.textContent = 'LIVE'; });
+    socket.on('disconnect', () => { connBadge.classList.add('offline'); connText.textContent = 'OFFLINE'; });
+
+    // ── Clock ─────────────────────────────────────────────────
+    function updateClock() {
+        document.getElementById('headerTime').textContent = new Date().toLocaleString('en-US', {
+            weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'
+        });
+    }
+    updateClock(); setInterval(updateClock, 1000);
+
+    // ── Chart ─────────────────────────────────────────────────
+    const MAX_POINTS = 60;
+    const chartLabels = [];
+    const chartCtx = document.getElementById('chartSoil').getContext('2d');
+
+    const gradient = chartCtx.createLinearGradient(0, 0, 0, 240);
+    gradient.addColorStop(0, 'rgba(59,130,246,0.15)');
+    gradient.addColorStop(1, 'rgba(59,130,246,0)');
+
+    const chartSoil = new Chart(chartCtx, {
+        type: 'line',
+        data: {
+            labels: chartLabels,
+            datasets: [{
+                label: 'Soil Moisture',
+                data: [],
+                borderColor: '#3b82f6',
+                backgroundColor: gradient,
+                fill: true, tension: 0.4,
+                pointRadius: 0, pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#3b82f6',
+                borderWidth: 2.5,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: { duration: 400, easing: 'easeOutQuart' },
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(17,28,42,0.95)', borderColor: '#1e3048', borderWidth: 1,
+                    titleFont: { size: 11, weight: '600' }, bodyFont: { size: 12 },
+                    padding: 10, cornerRadius: 8,
+                    callbacks: { label: ctx => 'Soil: ' + ctx.parsed.y + '%' }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#3d5468', maxTicksLimit: 8, font: { size: 10 } },
+                    grid: { color: 'rgba(30,48,72,0.3)', drawBorder: false }
+                },
+                y: {
+                    min: 0, max: 100,
+                    ticks: { color: '#3d5468', font: { size: 10 }, stepSize: 20, callback: v => v + '%' },
+                    grid: { color: 'rgba(30,48,72,0.3)', drawBorder: false }
+                }
+            }
+        }
+    });
+
+    // ── State ─────────────────────────────────────────────────
+    let totalReadings = 0;
+    let pumpCycles = 0;
+    let lastPumpState = false;
+    const levelBarsData = [];
+
+    // ── Update functions ──────────────────────────────────────
+    function updateGauge(pctVal) {
+        const pct = Math.min(Math.max(pctVal / 100, 0), 1);
+        const circumference = 2 * Math.PI * 26;  // r=26
+        document.getElementById('gaugeFill').style.strokeDasharray = circumference;
+        document.getElementById('gaugeFill').style.strokeDashoffset = circumference * (1 - pct);
+        document.getElementById('valSoil').textContent = pctVal;
+        document.getElementById('gaugeBarFill').style.width = (pct * 100) + '%';
+
+        const fill = document.getElementById('gaugeFill');
+        const gaugeVal = document.getElementById('valSoil');
+        const status = document.getElementById('soilStatus');
+
+        if (pctVal <= 20) {
+            fill.style.stroke = '#ef4444';
+            gaugeVal.style.color = '#ef4444';
+            status.className = 'gauge-status dry';
+            status.innerHTML = '<span>&#9679;</span> Dry — needs water';
+        } else if (pctVal <= 60) {
+            fill.style.stroke = '#3b82f6';
+            gaugeVal.style.color = '#3b82f6';
+            status.className = 'gauge-status ok';
+            status.innerHTML = '<span>&#9679;</span> Moderate moisture';
+        } else {
+            fill.style.stroke = '#22c55e';
+            gaugeVal.style.color = '#22c55e';
+            status.className = 'gauge-status wet';
+            status.innerHTML = '<span>&#9679;</span> Well watered';
+        }
+    }
+
+    function updatePump(isOn) {
+        const visual = document.getElementById('pumpVisual');
+        const state = document.getElementById('valPump');
+        const label = document.getElementById('pumpSub');
+
+        if (isOn) {
+            visual.className = 'pump-visual on';
+            state.className = 'pump-state on'; state.textContent = 'ON';
+            label.textContent = 'Watering in progress...';
+            if (!lastPumpState) { pumpCycles++; document.getElementById('pumpCycles').textContent = pumpCycles; }
+            document.getElementById('lastPumpTime').textContent = new Date().toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'});
+        } else {
+            visual.className = 'pump-visual off';
+            state.className = 'pump-state off'; state.textContent = 'OFF';
+            label.textContent = 'Standing by';
+        }
+        lastPumpState = isOn;
+    }
+
+    function updateDevice(d) {
+        totalReadings++;
+        document.getElementById('devReadings').textContent = totalReadings;
+        document.getElementById('devLastUpdate').textContent = d.created_at ? d.created_at.split(' ')[1] : '--';
+    }
+
+    function pushChartPoint(d) {
+        const t = d.created_at ? d.created_at.split(' ')[1] : new Date().toLocaleTimeString();
+        chartLabels.push(t);
+        chartSoil.data.datasets[0].data.push(d.soil_percent != null ? d.soil_percent : 0);
+        if (chartLabels.length > MAX_POINTS) { chartLabels.shift(); chartSoil.data.datasets[0].data.shift(); }
+        chartSoil.update();
+    }
+
+    function updateLevelBars(d) {
+        const t = d.created_at ? d.created_at.split(' ')[1] : '--';
+        const pctVal = d.soil_percent != null ? d.soil_percent : 0;
+        levelBarsData.unshift({ time: t, val: pctVal });
+        if (levelBarsData.length > 10) levelBarsData.pop();
+        renderLevelBars();
+    }
+
+    function renderLevelBars() {
+        const container = document.getElementById('levelBars');
+        container.innerHTML = levelBarsData.map(b => {
+            const pct = Math.min(Math.max(b.val, 0), 100);
+            const color = b.val <= 20 ? '#ef4444' : b.val <= 60 ? '#3b82f6' : '#22c55e';
+            return `<div class="level-bar-row">
+                <span class="level-bar-time">${b.time}</span>
+                <div class="level-bar-track">
+                    <div class="level-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,${color}cc,${color}44)"></div>
+                </div>
+                <span class="level-bar-val">${b.val}%</span>
+            </div>`;
+        }).join('');
+    }
+
+    function addTableRow(d, prepend) {
+        const tbody = document.getElementById('readingsBody');
+        const tr = document.createElement('tr');
+        tr.style.animation = prepend ? 'slideIn 0.3s ease' : 'none';
+        const pctVal = d.soil_percent != null ? d.soil_percent : '--';
+        tr.innerHTML = `
+            <td>${d.created_at || '—'}</td>
+            <td class="td-soil">${pctVal}%</td>
+            <td><span class="badge ${d.pump_status ? 'on' : 'off'}"><span class="badge-dot"></span>${d.pump_status ? 'ON' : 'OFF'}</span></td>
+        `;
+        if (prepend) {
+            tbody.insertBefore(tr, tbody.firstChild);
+            while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
+        } else { tbody.appendChild(tr); }
+    }
+
+    function handleReading(d) {
+        updateGauge(d.soil_percent != null ? d.soil_percent : 0);
+        updatePump(d.pump_status);
+        updateDevice(d);
+        pushChartPoint(d);
+        updateLevelBars(d);
+    }
+
+    // ── Real-time ─────────────────────────────────────────────
+    socket.on('new_reading', d => {
+        handleReading(d);
+        addTableRow(d, true);
+    });
+
+    // ── Initial load ──────────────────────────────────────────
+    fetch('/api/readings?limit=60')
+        .then(r => r.json())
+        .then(readings => {
+            totalReadings = readings.length;
+            if (readings.length > 0) {
+                const last = readings[readings.length - 1];
+                updateGauge(last.soil_percent != null ? last.soil_percent : 0);
+                updatePump(last.pump_status);
+                document.getElementById('devReadings').textContent = totalReadings;
+                document.getElementById('devLastUpdate').textContent = last.created_at ? last.created_at.split(' ')[1] : '--';
+            }
+            readings.forEach(d => {
+                pushChartPoint(d);
+                addTableRow(d, false);
+            });
+            // Populate level bars with last 10
+            readings.slice(-10).reverse().forEach(d => {
+                const t = d.created_at ? d.created_at.split(' ')[1] : '--';
+                levelBarsData.push({ time: t, val: d.soil_percent != null ? d.soil_percent : 0 });
+            });
+            renderLevelBars();
+            document.getElementById('readingCount').textContent = readings.length + ' entries';
+        });
+
+    // ── Camera ────────────────────────────────────────────────
+    let currentCamSource = 'esp';
+    let espCamOnline = false;
+    let snapshotTimer = null;
+
+    function activateStream(streamUrl) {
+        espCamOnline = true;
+        if (currentCamSource === 'esp') showEspStream();
+    }
+
+    function stopSnapshotPolling() {
+        if (snapshotTimer) { clearInterval(snapshotTimer); snapshotTimer = null; }
+    }
+
+    function showEspStream() {
+        stopSnapshotPolling();
+        const img = document.getElementById('camStreamImg');
+        const placeholder = document.getElementById('streamPlaceholder');
+        const badge = document.getElementById('streamBadge');
+        if (espCamOnline) {
+            placeholder.style.display = 'none';
+            img.style.display = 'block';
+            badge.style.display = 'flex';
+            // Use snapshot polling (works on all browsers including mobile)
+            let loading = false;
+            function fetchFrame() {
+                if (loading || currentCamSource !== 'esp') return;
+                loading = true;
+                const t = Date.now();
+                const tmp = new Image();
+                tmp.onload = () => {
+                    img.src = tmp.src;
+                    loading = false;
+                };
+                tmp.onerror = () => { loading = false; };
+                tmp.src = '/api/camera/proxy-capture?t=' + t;
+            }
+            fetchFrame();
+            snapshotTimer = setInterval(fetchFrame, 200);
+        } else {
+            img.style.display = 'none';
+            img.src = '';
+            placeholder.querySelector('.ph-text').textContent = 'Waiting for ESP32-CAM...';
+            placeholder.querySelector('.ph-hint').textContent = 'Live feed will appear automatically';
+            placeholder.style.display = 'flex';
+            badge.style.display = 'none';
+        }
+    }
+
+    function showPhoneStream() {
+        stopSnapshotPolling();
+        const img = document.getElementById('camStreamImg');
+        const placeholder = document.getElementById('streamPlaceholder');
+        const badge = document.getElementById('streamBadge');
+        img.src = '';
+        img.style.display = 'block';
+        placeholder.querySelector('.ph-text').textContent = 'Waiting for phone camera...';
+        placeholder.querySelector('.ph-hint').textContent = 'Open /phone-cam on your phone to start streaming';
+        placeholder.style.display = 'flex';
+        badge.style.display = 'none';
+    }
+
+    function switchCam(source) {
+        currentCamSource = source;
+        document.getElementById('btnEspCam').classList.toggle('active', source === 'esp');
+        document.getElementById('btnPhoneCam').classList.toggle('active', source === 'phone');
+        document.getElementById('camSourceLabel').textContent = source === 'esp' ? 'Plant Camera' : 'Phone Camera';
+
+        if (source === 'esp') {
+            showEspStream();
+        } else {
+            showPhoneStream();
+        }
+    }
+
+    // Receive phone camera frames via SocketIO
+    socket.on('phone_cam_frame', data => {
+        if (currentCamSource !== 'phone') return;
+        const img = document.getElementById('camStreamImg');
+        const placeholder = document.getElementById('streamPlaceholder');
+        const badge = document.getElementById('streamBadge');
+        img.src = 'data:image/jpeg;base64,' + data.data;
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+        badge.style.display = 'flex';
+    });
+
+    // Listen for camera registration
+    socket.on('camera_status', data => {
+        document.getElementById('camStatus').textContent = 'Online';
+        document.getElementById('camIP').textContent = data.ip || '--';
+        if (data.stream_url) {
+            activateStream(data.stream_url);
+        }
+    });
+
+    // Load camera info on page load
+    fetch('/api/camera/info')
+        .then(r => r.json())
+        .then(info => {
+            if (info.online) {
+                document.getElementById('camStatus').textContent = 'Online';
+                document.getElementById('camIP').textContent = info.ip || '--';
+                if (info.stream_url) activateStream(info.stream_url);
+            }
+        })
+        .catch(() => {});
+</script>
+</body>
+</html>

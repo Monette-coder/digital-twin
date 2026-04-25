@@ -1,0 +1,1 @@
+cd "c:\Users\dexter james degayo\Documents\mons_iot"; python -c "import sqlite3; conn = sqlite3.connect('mons_iot.db'); conn.execute('DELETE FROM sensor_readings'); conn.commit(); print('Deleted', conn.total_changes, 'rows'); conn.close()"
